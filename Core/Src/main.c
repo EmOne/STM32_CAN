@@ -92,7 +92,7 @@ int main(void)
   MX_USART2_UART_Init();
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
-	CANSPI_Initialize();
+	CANSPI_Initialize(CAN_125KBPS, MCP_16MHz);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -104,11 +104,12 @@ int main(void)
     /* USER CODE BEGIN 3 */
 		if (CANSPI_Receive(&rxMessage))
 		{
+
 			txMessage.frame.idType = rxMessage.frame.idType;
 			txMessage.frame.id = rxMessage.frame.id;
 			txMessage.frame.dlc = rxMessage.frame.dlc;
 			txMessage.frame.data0++;
-//			txMessage.frame.data1 = rxMessage.frame.data1;
+			//			txMessage.frame.data1 = rxMessage.frame.data1;
 			txMessage.frame.data2 = rxMessage.frame.data2;
 			txMessage.frame.data3 = rxMessage.frame.data3;
 			txMessage.frame.data4 = rxMessage.frame.data4;
@@ -121,7 +122,7 @@ int main(void)
 		txMessage.frame.idType = dSTANDARD_CAN_MSG_ID_2_0B;
 		txMessage.frame.id = 0x0A;
 		txMessage.frame.dlc = 8;
-//		txMessage.frame.data0 = 0;
+		//		txMessage.frame.data0 = 0;
 		txMessage.frame.data1++;
 		txMessage.frame.data2 = 2;
 		txMessage.frame.data3 = 3;
@@ -130,7 +131,6 @@ int main(void)
 		txMessage.frame.data6 = 6;
 		txMessage.frame.data7 = 7;
 		CANSPI_Transmit(&txMessage);
-
 		HAL_Delay(1000);
   }
   /* USER CODE END 3 */

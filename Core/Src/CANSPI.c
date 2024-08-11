@@ -48,112 +48,180 @@ void CANSPI_Sleep(void)
 }
 
 /* Initialize CAN */
-bool CANSPI_Initialize(void)
+bool CANSPI_Initialize(const uint8_t canSpeed, const uint8_t clock)
 {
-  RXF0 RXF0reg;
-  RXF1 RXF1reg;
-  RXF2 RXF2reg;
-  RXF3 RXF3reg;
-  RXF4 RXF4reg;
-  RXF5 RXF5reg;
-  RXM0 RXM0reg;
-  RXM1 RXM1reg;
-      
-  /* Intialize Rx Mask values */
-  RXM0reg.RXM0SIDH = 0x00;
-  RXM0reg.RXM0SIDL = 0x00;
-  RXM0reg.RXM0EID8 = 0x00;
-  RXM0reg.RXM0EID0 = 0x00;
-  
-  RXM1reg.RXM1SIDH = 0x00;
-  RXM1reg.RXM1SIDL = 0x00;
-  RXM1reg.RXM1EID8 = 0x00;
-  RXM1reg.RXM1EID0 = 0x00;
-  
-  /* Intialize Rx Filter values */
-  RXF0reg.RXF0SIDH = 0x00;      
-  RXF0reg.RXF0SIDL = 0x00;      //Starndard Filter
-  RXF0reg.RXF0EID8 = 0x00;
-  RXF0reg.RXF0EID0 = 0x00;
-  
-  RXF1reg.RXF1SIDH = 0x00;
-  RXF1reg.RXF1SIDL = 0x08;      //Exntended Filter
-  RXF1reg.RXF1EID8 = 0x00;
-  RXF1reg.RXF1EID0 = 0x00;
-  
-  RXF2reg.RXF2SIDH = 0x00;
-  RXF2reg.RXF2SIDL = 0x00;
-  RXF2reg.RXF2EID8 = 0x00;
-  RXF2reg.RXF2EID0 = 0x00;
-  
-  RXF3reg.RXF3SIDH = 0x00;
-  RXF3reg.RXF3SIDL = 0x00;
-  RXF3reg.RXF3EID8 = 0x00;
-  RXF3reg.RXF3EID0 = 0x00;
-  
-  RXF4reg.RXF4SIDH = 0x00;
-  RXF4reg.RXF4SIDL = 0x00;
-  RXF4reg.RXF4EID8 = 0x00;
-  RXF4reg.RXF4EID0 = 0x00;
-  
-  RXF5reg.RXF5SIDH = 0x00;
-  RXF5reg.RXF5SIDL = 0x08;
-  RXF5reg.RXF5EID8 = 0x00;
-  RXF5reg.RXF5EID0 = 0x00;
-  
+	uint8_t res;
+	RXF0 RXF0reg;
+	RXF1 RXF1reg;
+	RXF2 RXF2reg;
+	RXF3 RXF3reg;
+	RXF4 RXF4reg;
+	RXF5 RXF5reg;
+	RXM0 RXM0reg;
+	RXM1 RXM1reg;
+
+	/* Intialize Rx Mask values */
+	RXM0reg.RXM0SIDH = 0x00;
+	RXM0reg.RXM0SIDL = 0x00;
+	RXM0reg.RXM0EID8 = 0x00;
+	RXM0reg.RXM0EID0 = 0x00;
+
+	RXM1reg.RXM1SIDH = 0x00;
+	RXM1reg.RXM1SIDL = 0x00;
+	RXM1reg.RXM1EID8 = 0x00;
+	RXM1reg.RXM1EID0 = 0x00;
+
+	/* Intialize Rx Filter values */
+	RXF0reg.RXF0SIDH = 0x00;
+	RXF0reg.RXF0SIDL = 0x00;      //Starndard Filter
+	RXF0reg.RXF0EID8 = 0x00;
+	RXF0reg.RXF0EID0 = 0x00;
+
+	RXF1reg.RXF1SIDH = 0x00;
+	RXF1reg.RXF1SIDL = 0x08;      //Exntended Filter
+	RXF1reg.RXF1EID8 = 0x00;
+	RXF1reg.RXF1EID0 = 0x00;
+
+	RXF2reg.RXF2SIDH = 0x00;
+	RXF2reg.RXF2SIDL = 0x00;
+	RXF2reg.RXF2EID8 = 0x00;
+	RXF2reg.RXF2EID0 = 0x00;
+
+	RXF3reg.RXF3SIDH = 0x00;
+	RXF3reg.RXF3SIDL = 0x00;
+	RXF3reg.RXF3EID8 = 0x00;
+	RXF3reg.RXF3EID0 = 0x00;
+
+	RXF4reg.RXF4SIDH = 0x00;
+	RXF4reg.RXF4SIDL = 0x00;
+	RXF4reg.RXF4EID8 = 0x00;
+	RXF4reg.RXF4EID0 = 0x00;
+
+	RXF5reg.RXF5SIDH = 0x00;
+	RXF5reg.RXF5SIDL = 0x08;
+	RXF5reg.RXF5EID8 = 0x00;
+	RXF5reg.RXF5EID0 = 0x00;
+
   /* Intialize MCP2515, check SPI */
   if(!MCP2515_Initialize())
   {
     return false;
   }
-    
+
+	MCP2515_Reset();
+
+
   /* Change mode as configuration mode */
-  if(!MCP2515_SetConfigMode())
+	res = mcp2515_setCANCTRL_Mode(MODE_CONFIG);
+	if (res > 0)
   {
+		HAL_Delay(10);
     return false;
   }
   
-  /* Configure filter & mask */
-  MCP2515_WriteByteSequence(MCP2515_RXM0SIDH, MCP2515_RXM0EID0, &(RXM0reg.RXM0SIDH));
-  MCP2515_WriteByteSequence(MCP2515_RXM1SIDH, MCP2515_RXM1EID0, &(RXM1reg.RXM1SIDH));
-  MCP2515_WriteByteSequence(MCP2515_RXF0SIDH, MCP2515_RXF0EID0, &(RXF0reg.RXF0SIDH));
-  MCP2515_WriteByteSequence(MCP2515_RXF1SIDH, MCP2515_RXF1EID0, &(RXF1reg.RXF1SIDH));
-  MCP2515_WriteByteSequence(MCP2515_RXF2SIDH, MCP2515_RXF2EID0, &(RXF2reg.RXF2SIDH));
-  MCP2515_WriteByteSequence(MCP2515_RXF3SIDH, MCP2515_RXF3EID0, &(RXF3reg.RXF3SIDH));
-  MCP2515_WriteByteSequence(MCP2515_RXF4SIDH, MCP2515_RXF4EID0, &(RXF4reg.RXF4SIDH));
-  MCP2515_WriteByteSequence(MCP2515_RXF5SIDH, MCP2515_RXF5EID0, &(RXF5reg.RXF5SIDH));
-  
-  /* Accept All (Standard + Extended) */
-  MCP2515_WriteByte(MCP2515_RXB0CTRL, 0x04);    //Enable BUKT, Accept Filter 0
-  MCP2515_WriteByte(MCP2515_RXB1CTRL, 0x01);    //Accept Filter 1
-      
-  /* 
-  * tq = 2 * (brp(0) + 1) / 16000000 = 0.125us
-  * tbit = (SYNC_SEG(1 fixed) + PROP_SEG + PS1 + PS2)
-  * tbit = 1tq + 5tq + 6tq + 4tq = 16tq
-  * 16tq = 2us = 500kbps
-  */
-  
-  /* 00(SJW 1tq) 000000 */  
 
-//  MCP2515_WriteByte(MCP2515_CNF1, 0x00);
-	MCP2515_WriteByte(MCP2515_CNF1, MCP_16MHz_125kBPS_CFG1);
-  
-  /* 1 1 100(5tq) 101(6tq) */  
-  MCP2515_WriteByte(MCP2515_CNF2, MCP_16MHz_125kBPS_CFG2);
-  
-  /* 1 0 000 011(4tq) */  
-  MCP2515_WriteByte(MCP2515_CNF3, MCP_16MHz_125kBPS_CFG3);
-  
+//  /* Configure filter & mask */
+	MCP2515_WriteByteSequence(MCP2515_RXM0SIDH, MCP2515_RXM0EID0,
+			&(RXM0reg.RXM0SIDH));
+	MCP2515_WriteByteSequence(MCP2515_RXM1SIDH, MCP2515_RXM1EID0,
+			&(RXM1reg.RXM1SIDH));
+	MCP2515_WriteByteSequence(MCP2515_RXF0SIDH, MCP2515_RXF0EID0,
+			&(RXF0reg.RXF0SIDH));
+	MCP2515_WriteByteSequence(MCP2515_RXF1SIDH, MCP2515_RXF1EID0,
+			&(RXF1reg.RXF1SIDH));
+	MCP2515_WriteByteSequence(MCP2515_RXF2SIDH, MCP2515_RXF2EID0,
+			&(RXF2reg.RXF2SIDH));
+	MCP2515_WriteByteSequence(MCP2515_RXF3SIDH, MCP2515_RXF3EID0,
+			&(RXF3reg.RXF3SIDH));
+	MCP2515_WriteByteSequence(MCP2515_RXF4SIDH, MCP2515_RXF4EID0,
+			&(RXF4reg.RXF4SIDH));
+	MCP2515_WriteByteSequence(MCP2515_RXF5SIDH, MCP2515_RXF5EID0,
+			&(RXF5reg.RXF5SIDH));
+//
+//  /* Accept All (Standard + Extended) */
+	MCP2515_WriteByte(MCP2515_RXB0CTRL, 0x04);    //Enable BUKT, Accept Filter 0
+	MCP2515_WriteByte(MCP2515_RXB1CTRL, 0x01);    //Accept Filter 1
+//
+//  /*
+//  * tq = 2 * (brp(0) + 1) / 16000000 = 0.125us
+//  * tbit = (SYNC_SEG(1 fixed) + PROP_SEG + PS1 + PS2)
+//  * tbit = 1tq + 5tq + 6tq + 4tq = 16tq
+//  * 16tq = 2us = 500kbps
+//	 *
+//  */
+//	//INFO: See bit rate setting in mcp2515_can_dfs.h
+////  MCP2515_WriteByte(MCP2515_CNF1, 0x00);
+//	MCP2515_WriteByte(MCP2515_CNF1, MCP_16MHz_125kBPS_CFG1);
+//
+//  /* 1 1 100(5tq) 101(6tq) */
+//  MCP2515_WriteByte(MCP2515_CNF2, MCP_16MHz_125kBPS_CFG2);
+//
+//  /* 1 0 000 011(4tq) */
+//  MCP2515_WriteByte(MCP2515_CNF3, MCP_16MHz_125kBPS_CFG3);
+
+	 // set boadrate
+	res = mcp2515_configRate(canSpeed, clock);
+	if (res > 0)
+	{
+
+		HAL_Delay(10);
+
+		return res;
+	}
+
   /* Normal 모드로 설정 */
-  if(!MCP2515_SetNormalMode())
-    return false;
-  
-  return true;
+	if (res == MCP2515_OK)
+	{
+
+		// init canbuffers
+		mcp2515_initCANBuffers();
+
+		// interrupt mode
+		MCP2515_WriteByte(MCP2515_CANINTE, MCP_RX0IF | MCP_RX1IF);
+
+#if (DEBUG_RXANY==1)
+	    // enable both receive-buffers to receive any message and enable rollover
+		MCP2515_BitModify(MCP2515_RXB0CTRL,
+	                           MCP_RXB_RX_MASK | MCP_RXB_BUKT_MASK,
+	                           MCP_RXB_RX_ANY | MCP_RXB_BUKT_MASK);
+	    MCP2515_BitModify(MCP2515_RXB1CTRL, MCP_RXB_RX_MASK,
+	                           MCP_RXB_RX_ANY);
+#else
+		// enable both receive-buffers to receive messages with std. and ext. identifiers and enable rollover
+		MCP2515_BitModify(MCP2515_RXB0CTRL,
+		MCP_RXB_RX_MASK | MCP_RXB_BUKT_MASK,
+		MCP_RXB_RX_STDEXT | MCP_RXB_BUKT_MASK);
+		MCP2515_BitModify(MCP2515_RXB1CTRL, MCP_RXB_RX_MASK,
+		MCP_RXB_RX_STDEXT);
+#endif
+		// enter normal mode
+		res = mcp2515_setMode(MODE_NORMAL);
+		if (res)
+		{
+#if DEBUG_EN
+//			SERIAL_PORT_MONITOR.println(F("Enter Normal Mode Fail!!"));
+#else
+	        delay(10);
+	        #endif
+			return res;
+		}
+
+#if DEBUG_EN
+//		SERIAL_PORT_MONITOR.println(F("Enter Normal Mode Success!!"));
+#else
+	    delay(10);
+	    #endif
+
+	}
+	return res;
+//  if(!MCP2515_SetNormalMode())
+//    return false;
+//
+//  return true;
 }
 
 /* Transmit CAN message */
-uint8_t CANSPI_Transmit(uCAN_MSG *tempCanMsg) 
+uint8_t CANSPI_Transmit(uCAN_MSG *tempCanMsg)
 {
   uint8_t returnValue = 0;
   

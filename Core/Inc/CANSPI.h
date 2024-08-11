@@ -25,6 +25,7 @@
 
 #include <stdbool.h>
 #include "main.h"
+#include "MCP2515.h"
 
 typedef union {
   struct {
@@ -46,7 +47,7 @@ typedef union {
 #define dSTANDARD_CAN_MSG_ID_2_0B 1
 #define dEXTENDED_CAN_MSG_ID_2_0B 2
 
-bool CANSPI_Initialize(void);
+bool CANSPI_Initialize(const uint8_t canSpeed, const uint8_t clock);
 void CANSPI_Sleep(void);
 uint8_t CANSPI_Transmit(uCAN_MSG *tempCanMsg);
 uint8_t CANSPI_Receive(uCAN_MSG *tempCanMsg);
@@ -54,5 +55,7 @@ uint8_t CANSPI_messagesInBuffer(void);
 uint8_t CANSPI_isBussOff(void);
 uint8_t CANSPI_isRxErrorPassive(void);
 uint8_t CANSPI_isTxErrorPassive(void);
+
+extern uint8_t mcpMode;
 
 #endif	/* __CAN_SPI_H */

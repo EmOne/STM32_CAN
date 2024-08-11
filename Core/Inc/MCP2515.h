@@ -24,18 +24,70 @@
 #define	__MCP2515_H
 
 #include <stdbool.h>
-#include "main.h"
+#include <inttypes.h>
+#include "CANSPI.h"
 #include "mcp2515_can_dfs.h"
-/* MCP2515 SPI Instruction Set */
-#define MCP2515_RESET           0xC0
 
-#define MCP2515_READ            0x03
+#define CAN_OK              (0)
+#define CAN_FAILINIT        (1)
+#define CAN_FAILTX          (2)
+#define CAN_MSGAVAIL        (3)
+#define CAN_NOMSG           (4)
+#define CAN_CTRLERROR       (5)
+#define CAN_GETTXBFTIMEOUT  (6)
+#define CAN_SENDMSGTIMEOUT  (7)
+#define CAN_FAIL            (0xff)
+
+// clock
+typedef enum
+{
+	MCP_NO_MHz,
+	/* apply to MCP2515 */
+	MCP_16MHz,
+	MCP_12MHz,
+	MCP_8MHz,
+	/* apply to MCP2518FD */
+	MCP2518FD_40MHz = MCP_16MHz /* To compatible MCP2515 shield */,
+	MCP2518FD_20MHz,
+	MCP2518FD_10MHz,
+} MCP_CLOCK_T;
+
+typedef enum
+{
+	CAN_NOBPS,
+	CAN_5KBPS,
+	CAN_10KBPS,
+	CAN_20KBPS,
+	CAN_25KBPS,
+	CAN_31K25BPS,
+	CAN_33KBPS,
+	CAN_40KBPS,
+	CAN_50KBPS,
+	CAN_80KBPS,
+	CAN_83K3BPS,
+	CAN_95KBPS,
+	CAN_95K2BPS,
+	CAN_100KBPS,
+	CAN_125KBPS,
+	CAN_200KBPS,
+	CAN_250KBPS,
+	CAN_500KBPS,
+	CAN_666KBPS,
+	CAN_800KBPS,
+	CAN_1000KBPS
+} MCP_BITTIME_SETUP;
+
+
+/* MCP2515 SPI Instruction Set */
+#define MCP2515_RESET           MCP_RESET
+
+#define MCP2515_READ            MCP_READ
 #define MCP2515_READ_RXB0SIDH   0x90
 #define MCP2515_READ_RXB0D0     0x92
 #define MCP2515_READ_RXB1SIDH   0x94
 #define MCP2515_READ_RXB1D0     0x96
 
-#define MCP2515_WRITE           0x02
+#define MCP2515_WRITE           MCP_WRITE
 #define MCP2515_LOAD_TXB0SIDH   0x40    /* TX0 ID location */
 #define MCP2515_LOAD_TXB0D0     0x41    /* TX0 Data location */
 #define MCP2515_LOAD_TXB1SIDH   0x42    /* TX1 ID location */
@@ -48,8 +100,8 @@
 #define MCP2515_RTS_TX2         0x84
 #define MCP2515_RTS_ALL         0x87
 #define MCP2515_READ_STATUS     0xA0
-#define MCP2515_RX_STATUS       0xB0
-#define MCP2515_BIT_MOD         0x05
+#define MCP2515_RX_STATUS       MCP_READ_STATUS
+#define MCP2515_BIT_MOD         MCP_BITMOD
 
 /* MCP25152515 Register Adresses */
 #define MCP2515_RXF0SIDH	0x00
@@ -64,7 +116,7 @@
 #define MCP2515_RXF2SIDL	0x09
 #define MCP2515_RXF2EID8	0x0A
 #define MCP2515_RXF2EID0	0x0B
-#define MCP2515_CANSTAT		0x0E
+#define MCP2515_CANSTAT		MCP_CANSTAT
 #define MCP2515_CANCTRL		0x0F
 
 #define MCP2515_RXF3SIDH	0x10
@@ -82,28 +134,28 @@
 #define MCP2515_TEC		0x1C
 #define MCP2515_REC		0x1D
 
-#define MCP2515_RXM0SIDH	0x20
-#define MCP2515_RXM0SIDL	0x21
-#define MCP2515_RXM0EID8	0x22
-#define MCP2515_RXM0EID0	0x23
-#define MCP2515_RXM1SIDH	0x24
-#define MCP2515_RXM1SIDL	0x25
-#define MCP2515_RXM1EID8	0x26
-#define MCP2515_RXM1EID0	0x27
-#define MCP2515_CNF3		0x28
-#define MCP2515_CNF2		0x29
-#define MCP2515_CNF1		0x2A
-#define MCP2515_CANINTE		0x2B
-#define MCP2515_CANINTF		0x2C
-#define MCP2515_EFLG		0x2D
+#define MCP2515_RXM0SIDH	MCP_RXM0SIDH
+#define MCP2515_RXM0SIDL	MCP_RXM0SIDL
+#define MCP2515_RXM0EID8	MCP_RXM0EID8
+#define MCP2515_RXM0EID0	MCP_RXM0EID0
+#define MCP2515_RXM1SIDH	MCP_RXM1SIDH
+#define MCP2515_RXM1SIDL	MCP_RXM1SIDL
+#define MCP2515_RXM1EID8	MCP_RXM1EID8
+#define MCP2515_RXM1EID0	MCP_RXM1EID0
+#define MCP2515_CNF3		MCP_CNF3
+#define MCP2515_CNF2		MCP_CNF2
+#define MCP2515_CNF1		MCP_CNF1
+#define MCP2515_CANINTE		MCP_CANINTE
+#define MCP2515_CANINTF		MCP_CANINTF
+#define MCP2515_EFLG		MCP_EFLG
 
-#define MCP2515_TXB0CTRL	0x30
-#define MCP2515_TXB1CTRL	0x40
-#define MCP2515_TXB2CTRL	0x50
-#define MCP2515_RXB0CTRL	0x60
-#define MCP2515_RXB0SIDH	0x61
-#define MCP2515_RXB1CTRL	0x70
-#define MCP2515_RXB1SIDH	0x71
+#define MCP2515_TXB0CTRL	MCP_TXB0CTRL
+#define MCP2515_TXB1CTRL	MCP_TXB1CTRL
+#define MCP2515_TXB2CTRL	MCP_TXB2CTRL
+#define MCP2515_RXB0CTRL	MCP_RXB0CTRL
+#define MCP2515_RXB0SIDH	MCP_RXB0SIDH
+#define MCP2515_RXB1CTRL	MCP_RXB1CTRL
+#define MCP2515_RXB1SIDH	MCP_RXB1SIDH
 
 /* Defines for Rx Status */
 #define MSG_IN_RXB0             0x01
@@ -247,5 +299,17 @@ void MCP2515_RequestToSend(uint8_t instruction);
 uint8_t MCP2515_ReadStatus(void);
 uint8_t MCP2515_GetRxStatus(void);
 void MCP2515_BitModify(uint8_t address, uint8_t mask, uint8_t data);
+
+uint8_t mcp2515_setCANCTRL_Mode(const uint8_t newmode);              // set mode
+uint8_t mcp2515_requestNewMode(const uint8_t newmode);               // Set mode
+uint8_t mcp2515_configRate(const uint8_t canSpeed, const uint8_t clock); // set baudrate
+void mcp2515_setSleepWakeup(uint8_t enable);
+uint8_t mcp2515_sleep(void);
+uint8_t mcp2515_setMode(const uint8_t opMode);
+uint8_t mcp2515_getMode(void);
+void mcp2515_initCANBuffers(void);
+void mcp2515_reserveTxBuffers(uint8_t nTxBuf);
+
+extern uint8_t mcpMode;
 
 #endif
