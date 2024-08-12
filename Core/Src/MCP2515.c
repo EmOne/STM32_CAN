@@ -1320,3 +1320,128 @@ void mcp2515_enableWkupInterrupt(bool enable)
 {
 
 }
+
+/*********************************************************************************************************
+ ** Function name:           mcp2515_write_id
+ ** Descriptions:            write can id
+ *********************************************************************************************************/
+void mcp2515_write_id(const uint8_t mcp_addr, const uint8_t ext,
+		const unsigned long id)
+{
+	uint8_t tbufdata[4];
+
+	mcp2515_id_to_buf(ext, id, tbufdata);
+	MCP2515_WriteByteSequence(mcp_addr, mcp_addr + 4, tbufdata);
+}
+
+/*********************************************************************************************************
+ ** Function name:           mcp2515_read_id
+ ** Descriptions:            read can id
+ *********************************************************************************************************/
+void mcp2515_read_id(const uint8_t mcp_addr, uint8_t *ext, unsigned long *id)
+{
+	uint8_t tbufdata[4];
+
+	*ext = 0;
+	*id = 0;
+
+	MCP2515_ReadRxSequence(mcp_addr, tbufdata, 4);
+
+	*id = (tbufdata[MCP_SIDH] << 3) + (tbufdata[MCP_SIDL] >> 5);
+
+	if ((tbufdata[MCP_SIDL] & MCP_TXB_EXIDE_M) == MCP_TXB_EXIDE_M)
+	{
+		// extended id
+		*id = (*id << 2) + (tbufdata[MCP_SIDL] & 0x03);
+		*id = (*id << 8) + tbufdata[MCP_EID8];
+		*id = (*id << 8) + tbufdata[MCP_EID0];
+		*ext = 1;
+	}
+}
+
+/*********************************************************************************************************
+ ** Function name:           init_Mask
+ ** Descriptions:            init canid Masks
+ *********************************************************************************************************/
+uint8_t mcp2515_init_Mask(uint8_t num, uint8_t ext, unsigned long ulData)
+{
+	uint8_t res = MCP2515_OK;
+
+	res = mcp2515_setCANCTRL_Mode(MODE_CONFIG);
+	if (res > 0)
+	{
+		return res;
+	}
+
+	if (num == 0)
+	{
+		mcp2515_write_id(MCP_RXM0SIDH, ext, ulData);
+
+	}
+	else if (num == 1)
+	{
+		mcp2515_write_id(MCP_RXM1SIDH, ext, ulData);
+	}
+	else
+	{
+		res = MCP2515_FAIL;
+	}
+
+	res = mcp2515_setCANCTRL_Mode(mcpMode);
+	if (res > 0)
+	{
+		return res;
+	}
+	return res;
+}
+
+/*********************************************************************************************************
+ ** Function name:           init_Filt
+ ** Descriptions:            init canid filters
+ *********************************************************************************************************/
+uint8_t mcp2515_init_Filt(uint8_t num, uint8_t ext, unsigned long ulData)
+{
+	uint8_t res = MCP2515_OK;
+	res = mcp2515_setCANCTRL_Mode(MODE_CONFIG);
+	if (res > 0)
+	{
+		return res;
+	}
+
+	switch (num)
+	{
+	case 0:
+		mcp2515_write_id(MCP_RXF0SIDH, ext, ulData);
+		break;
+
+	case 1:
+		mcp2515_write_id(MCP_RXF1SIDH, ext, ulData);
+		break;
+
+	case 2:
+		mcp2515_write_id(MCP_RXF2SIDH, ext, ulData);
+		break;
+
+	case 3:
+		mcp2515_write_id(MCP_RXF3SIDH, ext, ulData);
+		break;
+
+	case 4:
+		mcp2515_write_id(MCP_RXF4SIDH, ext, ulData);
+		break;
+
+	case 5:
+		mcp2515_write_id(MCP_RXF5SIDH, ext, ulData);
+		break;
+
+	default:
+		res = MCP2515_FAIL;
+	}
+
+	res = mcp2515_setCANCTRL_Mode(mcpMode);
+	if (res > 0)
+	{
+		return res;
+	}
+	return res;
+}

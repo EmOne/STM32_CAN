@@ -322,6 +322,12 @@ void mcp2515_enableRxInterrupt(bool enable);
 void mcp2515_enableErrInterrupt(bool enable);
 void mcp2515_enableWkupInterrupt(bool enable);
 
+void mcp2515_write_id(const uint8_t mcp_addr, const uint8_t ext,
+		const unsigned long id);
+void mcp2515_read_id(const uint8_t mcp_addr, uint8_t *ext, unsigned long *id);
+uint8_t mcp2515_init_Mask(uint8_t num, uint8_t ext, unsigned long ulData);
+uint8_t mcp2515_init_Filt(uint8_t num, uint8_t ext, unsigned long ulData);
+
 extern uint8_t mcpMode;
 
 #endif
