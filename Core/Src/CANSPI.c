@@ -177,7 +177,7 @@ bool CANSPI_Initialize(const uint8_t canSpeed, const uint8_t clock)
 		mcp2515_initCANBuffers();
 
 		// interrupt mode
-		MCP2515_WriteByte(MCP2515_CANINTE, MCP_RX0IF | MCP_RX1IF);
+		mcp2515_enableRxInterrupt(true);
 
 #if (DEBUG_RXANY==1)
 	    // enable both receive-buffers to receive any message and enable rollover

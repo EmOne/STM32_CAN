@@ -1276,3 +1276,47 @@ void mcp2515_id_to_buf(const uint8_t ext, const unsigned long id,
 		tbufdata[MCP_EID8] = 0;
 	}
 }
+
+/*********************************************************************************************************
+ ** Function name:           enableTxInterrupt
+ ** Descriptions:            enable interrupt for all tx buffers
+ *********************************************************************************************************/
+void mcp2515_enableTxInterrupt(bool enable)
+{
+	uint8_t interruptStatus = MCP2515_ReadByte(MCP_CANINTE);
+
+	if (enable)
+	{
+		interruptStatus |= MCP_TX_INT;
+	}
+	else
+	{
+		interruptStatus &= ~MCP_TX_INT;
+	}
+
+	MCP2515_WriteByte(MCP_CANINTE, interruptStatus);
+}
+
+void mcp2515_enableRxInterrupt(bool enable)
+{
+	uint8_t interruptStatus = MCP2515_ReadByte(MCP_CANINTE);
+
+	if (enable)
+	{
+		interruptStatus |= MCP_RX_INT;
+	}
+	else
+	{
+		interruptStatus &= ~MCP_RX_INT;
+	}
+
+	MCP2515_WriteByte(MCP_CANINTE, interruptStatus);
+}
+void mcp2515_enableErrInterrupt(bool enable)
+{
+
+}
+void mcp2515_enableWkupInterrupt(bool enable)
+{
+
+}
