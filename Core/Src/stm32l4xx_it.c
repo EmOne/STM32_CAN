@@ -57,7 +57,7 @@
 /* External variables --------------------------------------------------------*/
 
 /* USER CODE BEGIN EV */
-
+extern uint32_t flagRecv;
 /* USER CODE END EV */
 
 /******************************************************************************/
@@ -219,7 +219,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	switch (GPIO_Pin)
 	{
 	case CAN_INT_Pin:
-
+		flagRecv = 1;
 		break;
 	case B1_Pin:
 		break;

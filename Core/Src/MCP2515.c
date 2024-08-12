@@ -811,7 +811,7 @@ void MCP2515_ReadRxSequence(uint8_t instruction, uint8_t *data, uint8_t length)
 	MCP2515_SELECT;
 
 //	SPI_Tx(MCP2515_READ);
-  SPI_Tx(instruction);
+	SPI_RxBuffer(&instruction, 1);
 //	SPI_RxBuffer(data,
 //			length <= CAN_MAX_CHAR_IN_MESSAGE ?
 //					length : CAN_MAX_CHAR_IN_MESSAGE);
@@ -1101,4 +1101,178 @@ static uint8_t SPI_Rx(void)
 static void SPI_RxBuffer(uint8_t *buffer, uint8_t length)
 {
   HAL_SPI_Receive(SPI_CAN, buffer, length, SPI_TIMEOUT);
+}
+
+/*********************************************************************************************************
+ ** Function name:           mcp2515_start_transmit
+ ** Descriptions:            Start message transmit on mcp2515
+ *********************************************************************************************************/
+void mcp2515_start_transmit(const uint8_t mcp_addr)
+{            // start transmit
+
+	MCP2515_SELECT;
+	SPI_Tx(txSidhToRTS(mcp_addr));
+	MCP2515_UNSELECT;
+
+}
+
+/*********************************************************************************************************
+ ** Function name:           mcp2515_isTXBufFree
+ ** Descriptions:            Test is tx buffer free for transmitting
+ *********************************************************************************************************/
+uint8_t mcp2515_isTXBufFree(uint8_t *txbuf_n, uint8_t iBuf)
+{ /* get Next free txbuf          */
+	*txbuf_n = 0x00;
+
+	if (iBuf >= MCP_N_TXBUFFERS
+			|| (MCP2515_ReadStatus() & txStatusPendingFlag(iBuf)) != 0)
+	{
+		return MCP_ALLTXBUSY;
+	}
+
+	*txbuf_n = txCtrlReg(iBuf) + 1; /* return SIDH-address of Buffer */
+	MCP2515_BitModify(MCP_CANINTF, txIfFlag(iBuf), 0);
+
+	return MCP2515_OK;
+}
+
+/*********************************************************************************************************
+ ** Function name:           mcp2515_getNextFreeTXBuf
+ ** Descriptions:            finds next free tx buffer for sending. Return MCP_ALLTXBUSY, if there is none.
+ *********************************************************************************************************/
+uint8_t mcp2515_getNextFreeTXBuf(uint8_t *txbuf_n)
+{               // get Next free txbuf
+	uint8_t status = MCP2515_ReadStatus() & MCP_STAT_TX_PENDING_MASK;
+	uint8_t i;
+
+	*txbuf_n = 0x00;
+
+	if (status == MCP_STAT_TX_PENDING_MASK)
+	{
+		return MCP_ALLTXBUSY;    // All buffers are pending
+	}
+
+	// check all 3 TX-Buffers except reserved
+	for (i = 0; i < MCP_N_TXBUFFERS - nReservedTx; i++)
+	{
+		if ((status & txStatusPendingFlag(i)) == 0)
+		{
+			*txbuf_n = txCtrlReg(i) + 1;        // return SIDH-address of Buffer
+			MCP2515_BitModify(MCP_CANINTF, txIfFlag(i), 0);
+			return MCP2515_OK;                                // ! function exit
+		}
+	}
+
+	return MCP_ALLTXBUSY;
+}
+
+/*********************************************************************************************************
+ ** Function name:           mcp2515_write_canMsg
+ ** Descriptions:            write msg
+ **                          Note! There is no check for right address!
+ *********************************************************************************************************/
+void mcp2515_write_canMsg(const uint8_t buffer_sidh_addr, unsigned long id,
+		uint8_t ext, uint8_t rtrBit, uint8_t len, uint8_t *buf)
+{
+	uint8_t load_addr = txSidhToTxLoad(buffer_sidh_addr);
+
+	uint8_t tbufdata[4];
+	uint8_t dlc = len | (rtrBit ? MCP_RTR_MASK : 0);
+	uint8_t i;
+
+	mcp2515_id_to_buf(ext, id, tbufdata);
+
+#ifdef SPI_HAS_TRANSACTION
+	SPI_BEGIN();
+#endif
+	MCP2515_SELECT;
+	SPI_RxBuffer(&load_addr, 1);
+	for (i = 0; i < 4; i++)
+	{
+		SPI_Tx(tbufdata[i]);
+	}
+	SPI_Tx(dlc);
+	for (i = 0; i < len && i < CAN_MAX_CHAR_IN_MESSAGE; i++)
+	{
+		SPI_Tx(buf[i]);
+	}
+
+	MCP2515_UNSELECT;
+#ifdef SPI_HAS_TRANSACTION
+    SPI_END();
+    #endif
+
+	mcp2515_start_transmit(buffer_sidh_addr);
+
+}
+
+/*********************************************************************************************************
+ ** Function name:           mcp2515_read_canMsg
+ ** Descriptions:            read message
+ *********************************************************************************************************/
+void mcp2515_read_canMsg(const uint8_t buffer_load_addr,
+		volatile unsigned long *id, volatile uint8_t *ext,
+		volatile uint8_t *rtrBit, volatile uint8_t *len, volatile uint8_t *buf)
+{ /* read can msg                 */
+	uint8_t tbufdata[4];
+	uint8_t i;
+
+	MCP2515_SELECT;
+	SPI_RxBuffer(&buffer_load_addr, 1);
+	// mcp2515 has auto-increment of address-pointer
+	for (i = 0; i < 4; i++)
+	{
+		tbufdata[i] = SPI_Rx();
+	}
+
+	*id = (tbufdata[MCP_SIDH] << 3) + (tbufdata[MCP_SIDL] >> 5);
+	*ext = 0;
+	if ((tbufdata[MCP_SIDL] & MCP_TXB_EXIDE_M) == MCP_TXB_EXIDE_M)
+	{
+		/* extended id                  */
+		*id = (*id << 2) + (tbufdata[MCP_SIDL] & 0x03);
+		*id = (*id << 8) + tbufdata[MCP_EID8];
+		*id = (*id << 8) + tbufdata[MCP_EID0];
+		*ext = 1;
+	}
+
+	uint8_t pMsgSize = SPI_Rx();
+	*len = pMsgSize & MCP_DLC_MASK;
+	*rtrBit = (pMsgSize & MCP_RTR_MASK) ? 1 : 0;
+	for (i = 0; i < *len && i < CAN_MAX_CHAR_IN_MESSAGE; i++)
+	{
+		buf[i] = SPI_Rx();
+	}
+
+	MCP2515_UNSELECT;
+}
+
+/*********************************************************************************************************
+ ** Function name:           mcp2515_id_to_buf
+ ** Descriptions:            configure tbufdata[4] from id and ext
+ *********************************************************************************************************/
+void mcp2515_id_to_buf(const uint8_t ext, const unsigned long id,
+		uint8_t *tbufdata)
+{
+	uint16_t canid;
+
+	canid = (uint16_t) (id & 0x0FFFF);
+
+	if (ext == 1)
+	{
+		tbufdata[MCP_EID0] = (uint8_t) (canid & 0xFF);
+		tbufdata[MCP_EID8] = (uint8_t) (canid >> 8);
+		canid = (uint16_t) (id >> 16);
+		tbufdata[MCP_SIDL] = (uint8_t) (canid & 0x03);
+		tbufdata[MCP_SIDL] += (uint8_t) ((canid & 0x1C) << 3);
+		tbufdata[MCP_SIDL] |= MCP_TXB_EXIDE_M;
+		tbufdata[MCP_SIDH] = (uint8_t) (canid >> 5);
+	}
+	else
+	{
+		tbufdata[MCP_SIDH] = (uint8_t) (canid >> 3);
+		tbufdata[MCP_SIDL] = (uint8_t) ((canid & 0x07) << 5);
+		tbufdata[MCP_EID0] = 0;
+		tbufdata[MCP_EID8] = 0;
+	}
 }

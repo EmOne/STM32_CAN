@@ -49,13 +49,15 @@ typedef union {
 
 bool CANSPI_Initialize(const uint8_t canSpeed, const uint8_t clock);
 void CANSPI_Sleep(void);
-uint8_t CANSPI_Transmit(uCAN_MSG *tempCanMsg);
+uint8_t CANSPI_Transmit(uCAN_MSG *tempCanMsg, bool waitSent);
 uint8_t CANSPI_Receive(uCAN_MSG *tempCanMsg);
 uint8_t CANSPI_messagesInBuffer(void);
 uint8_t CANSPI_isBussOff(void);
 uint8_t CANSPI_isRxErrorPassive(void);
 uint8_t CANSPI_isTxErrorPassive(void);
+uint8_t CANSPI_CheckReceive(void);
 
 extern uint8_t mcpMode;
+extern uint32_t flagRecv;
 
 #endif	/* __CAN_SPI_H */

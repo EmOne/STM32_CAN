@@ -221,10 +221,54 @@ bool CANSPI_Initialize(const uint8_t canSpeed, const uint8_t clock)
 }
 
 /* Transmit CAN message */
-uint8_t CANSPI_Transmit(uCAN_MSG *tempCanMsg)
+uint8_t CANSPI_Transmit(uCAN_MSG *tempCanMsg, bool waitSent)
 {
   uint8_t returnValue = 0;
-  
+#if 0
+	uint8_t res, res1, txbuf_n;
+	uint16_t uiTimeOut = 0;
+	do
+	{
+		if (uiTimeOut > 0)
+		{
+			HAL_Delay(10);
+		}
+		res = mcp2515_getNextFreeTXBuf(&txbuf_n);                // info = addr.
+		uiTimeOut++;
+	} while (res == MCP_ALLTXBUSY && (uiTimeOut < TIMEOUTVALUE));
+
+	if (uiTimeOut == TIMEOUTVALUE)
+	{
+		return CAN_GETTXBFTIMEOUT;                       // get tx buff time out
+	}
+	uint8_t buf[8];
+	memcpy(buf, &tempCanMsg->frame.data0, 8);
+	mcp2515_write_canMsg(txbuf_n, tempCanMsg->frame.id, 0, 0,
+			tempCanMsg->frame.dlc, buf);
+
+	if (waitSent)
+	{
+		uiTimeOut = 0;
+		do
+		{
+			if (uiTimeOut > 0)
+			{
+				HAL_Delay(10);
+			}
+			uiTimeOut++;
+			res1 = MCP2515_ReadByte(txbuf_n - 1); // read send buff ctrl reg
+			res1 = res1 & 0x08;
+		} while (res1 && (uiTimeOut < TIMEOUTVALUE));
+
+		if (uiTimeOut == TIMEOUTVALUE)
+		{                                     // send msg timeout
+			return CAN_SENDMSGTIMEOUT;
+		}
+	}
+
+	return CAN_OK;
+#else
+
   idReg.tempSIDH = 0;
   idReg.tempSIDL = 0;
   idReg.tempEID8 = 0;
@@ -264,19 +308,52 @@ uint8_t CANSPI_Transmit(uCAN_MSG *tempCanMsg)
     
     returnValue = 1;
   }
-  
+#endif
   return (returnValue);
 }
 
 /* Receive CAN message */
 uint8_t CANSPI_Receive(uCAN_MSG *tempCanMsg) 
 {
-  uint8_t returnValue = 0;
-  rx_reg_t rxReg;
+	uint8_t returnValue = 0, RXnIF, ext, rtrBit;
+	rx_reg_t rxReg;
   ctrl_rx_status_t rxStatus;
-  
+	uint8_t rc = CAN_NOMSG;
+
   rxStatus.ctrl_rx_status = MCP2515_GetRxStatus();
-  
+#if 1
+	if (rxStatus.ctrl_rx_status & MCP_RX0IF)
+	{                                        // Msg in Buffer 0
+		mcp2515_read_canMsg(MCP_READ_RX0, &tempCanMsg->frame.id, &ext, &rtrBit,
+				&tempCanMsg->frame.dlc, &tempCanMsg->frame.data0);
+		rc = CAN_OK;
+	}
+	else if (rxStatus.ctrl_rx_status & MCP_RX1IF)
+	{                                 // Msg in Buffer 1
+		mcp2515_read_canMsg(MCP_READ_RX1, &tempCanMsg->frame.id, &ext, &rtrBit,
+				&tempCanMsg->frame.dlc, &tempCanMsg->frame.data0);
+		rc = CAN_OK;
+	}
+	else if (rxStatus.ctrl_rx_status & MCP_RX1IF)
+	{                                 // Msg in Buffer 1
+		mcp2515_read_canMsg(MCP_READ_RX1, &tempCanMsg->frame.id, &ext, &rtrBit,
+				&tempCanMsg->frame.dlc, &tempCanMsg->frame.data0);
+		rc = CAN_OK;
+	}
+
+//	if (rc == CAN_OK)
+//	{
+//		rtr = *rtrBit;
+//		// dta_len=*len; // not used on any interface function
+//		ext_flg = *ext;
+//		can_id = *id;
+//	}
+//	else
+//	{
+//		*len = 0;
+//	}
+
+#else
   /* Check receive buffer */
   if (rxStatus.rxBuffer != 0)
   {
@@ -312,11 +389,16 @@ uint8_t CANSPI_Receive(uCAN_MSG *tempCanMsg)
     tempCanMsg->frame.data5 = rxReg.RXBnD5;
     tempCanMsg->frame.data6 = rxReg.RXBnD6;
     tempCanMsg->frame.data7 = rxReg.RXBnD7;
-    
+
     returnValue = 1;
   }
-  
-  return (returnValue);
+#endif
+  //Clear RX interrupt flag
+	RXnIF = MCP2515_ReadByte(MCP2515_CANINTF);
+	RXnIF &= ~(MCP_RX0IF | MCP_RX1IF);
+	MCP2515_WriteByte(MCP2515_CANINTF, RXnIF);
+
+	return (rc);
 }
 
 /* check message buffer and return count */
@@ -454,4 +536,9 @@ static void convertCANid2Reg(uint32_t tempPassedInID, uint8_t canIdType, id_reg_
     tempPassedInID = tempPassedInID >> 8;
     passedIdReg->tempSIDH = 0xFF & tempPassedInID;
   }
+}
+
+uint8_t CANSPI_CheckReceive(void)
+{
+	return mcp2515_checkReceive();
 }

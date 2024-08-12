@@ -309,7 +309,14 @@ uint8_t mcp2515_setMode(const uint8_t opMode);
 uint8_t mcp2515_getMode(void);
 void mcp2515_initCANBuffers(void);
 void mcp2515_reserveTxBuffers(uint8_t nTxBuf);
-
+uint8_t mcp2515_checkReceive(void);
+void mcp2515_write_canMsg(const uint8_t buffer_sidh_addr, unsigned long id,
+		uint8_t ext, uint8_t rtrBit, uint8_t len, uint8_t *buf);
+void mcp2515_id_to_buf(const uint8_t ext, const unsigned long id,
+		uint8_t *tbufdata);
+void mcp2515_read_canMsg(const uint8_t buffer_load_addr,
+		volatile unsigned long *id, volatile uint8_t *ext,
+		volatile uint8_t *rtrBit, volatile uint8_t *len, volatile uint8_t *buf);
 extern uint8_t mcpMode;
 
 #endif
