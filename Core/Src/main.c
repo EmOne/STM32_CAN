@@ -75,7 +75,7 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+	HAL_Init();
 
   /* USER CODE BEGIN Init */
 
@@ -107,6 +107,11 @@ int main(void)
 		if (flagRecv)
 		{
 			flagRecv = 0;
+			if (CANSPI_CheckErr() > 0)
+			{
+				CANSPI_Initialize(CAN_125KBPS, MCP_16MHz);
+				continue;
+			}
 
 			if (CANSPI_CheckReceive() == CAN_MSGAVAIL)
 			{

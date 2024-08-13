@@ -178,6 +178,8 @@ bool CANSPI_Initialize(const uint8_t canSpeed, const uint8_t clock)
 
 		// interrupt mode
 		mcp2515_enableRxInterrupt(true);
+		mcp2515_enableErrInterrupt(true);
+		mcp2515_enableMsgErrInterrupt(true);
 
 #if (DEBUG_RXANY==1)
 	    // enable both receive-buffers to receive any message and enable rollover
@@ -541,4 +543,37 @@ static void convertCANid2Reg(uint32_t tempPassedInID, uint8_t canIdType, id_reg_
 uint8_t CANSPI_CheckReceive(void)
 {
 	return mcp2515_checkReceive();
+}
+
+uint8_t CANSPI_CheckErr(void)
+{
+	uint8_t ret = 0;
+	uint8_t flags = MCP2515_ReadByte(MCP2515_CANINTF);
+	if (flags & (MCP_MERRF)) // Message error
+	{
+
+		flags &= ~(MCP_MERRF);
+		MCP2515_WriteByte(MCP2515_CANINTF, flags);
+		ret |= 0x01;
+	}
+
+	if (flags & (MCP_ERRIF)) // Error
+	{
+		if (CANSPI_isBussOff())
+		{
+			ret |= 0x10;
+		}
+		if (CANSPI_isTxErrorPassive())
+		{
+			ret |= 0x20;
+		}
+		if (CANSPI_isRxErrorPassive())
+		{
+			ret |= 0x40;
+		}
+		flags &= ~(1 << 5);
+		MCP2515_WriteByte(MCP2515_CANINTF, flags);
+		ret |= 0x80;
+	}
+	return ret;
 }

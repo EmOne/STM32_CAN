@@ -1312,15 +1312,54 @@ void mcp2515_enableRxInterrupt(bool enable)
 
 	MCP2515_WriteByte(MCP_CANINTE, interruptStatus);
 }
+
 void mcp2515_enableErrInterrupt(bool enable)
 {
+	uint8_t interruptStatus = MCP2515_ReadByte(MCP_CANINTE);
 
+	if (enable)
+	{
+		interruptStatus |= (MCP_ERRIF);
+	}
+	else
+	{
+		interruptStatus &= ~(MCP_ERRIF);
+	}
+
+	MCP2515_WriteByte(MCP_CANINTE, interruptStatus);
 }
+
 void mcp2515_enableWkupInterrupt(bool enable)
 {
+	uint8_t interruptStatus = MCP2515_ReadByte(MCP_CANINTE);
 
+	if (enable)
+	{
+		interruptStatus |= (MCP_WAKIF);
+	}
+	else
+	{
+		interruptStatus &= ~(MCP_WAKIF);
+	}
+
+	MCP2515_WriteByte(MCP_CANINTE, interruptStatus);
 }
 
+void mcp2515_enableMsgErrInterrupt(bool enable)
+{
+	uint8_t interruptStatus = MCP2515_ReadByte(MCP_CANINTE);
+
+	if (enable)
+	{
+		interruptStatus |= (MCP_MERRF);
+	}
+	else
+	{
+		interruptStatus &= ~(MCP_MERRF);
+	}
+
+	MCP2515_WriteByte(MCP_CANINTE, interruptStatus);
+}
 /*********************************************************************************************************
  ** Function name:           mcp2515_write_id
  ** Descriptions:            write can id

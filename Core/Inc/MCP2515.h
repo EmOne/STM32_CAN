@@ -317,10 +317,12 @@ void mcp2515_id_to_buf(const uint8_t ext, const unsigned long id,
 void mcp2515_read_canMsg(const uint8_t buffer_load_addr,
 		volatile unsigned long *id, volatile uint8_t *ext,
 		volatile uint8_t *rtrBit, volatile uint8_t *len, volatile uint8_t *buf);
+
 void mcp2515_enableTxInterrupt(bool enable);
 void mcp2515_enableRxInterrupt(bool enable);
 void mcp2515_enableErrInterrupt(bool enable);
 void mcp2515_enableWkupInterrupt(bool enable);
+void mcp2515_enableMsgErrInterrupt(bool enable);
 
 void mcp2515_write_id(const uint8_t mcp_addr, const uint8_t ext,
 		const unsigned long id);

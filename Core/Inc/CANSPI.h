@@ -56,6 +56,7 @@ uint8_t CANSPI_isBussOff(void);
 uint8_t CANSPI_isRxErrorPassive(void);
 uint8_t CANSPI_isTxErrorPassive(void);
 uint8_t CANSPI_CheckReceive(void);
+uint8_t CANSPI_CheckErr(void);
 
 extern uint8_t mcpMode;
 extern uint32_t flagRecv;
