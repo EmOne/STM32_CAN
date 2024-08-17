@@ -21,7 +21,13 @@
 #include "can.h"
 
 /* USER CODE BEGIN 0 */
-
+CAN_RxHeaderTypeDef rxHeader; //CAN Bus Transmit Header
+CAN_TxHeaderTypeDef txHeader; //CAN Bus Receive Header
+uint8_t canRX[8] =
+{ 0, 0, 0, 0, 0, 0, 0, 0 };  //CAN Bus Receive Buffer
+CAN_FilterTypeDef canfil; //CAN Bus Filter
+uint32_t canMailbox; //CAN Bus Mail box variable
+uint8_t flagRecv = 0;
 /* USER CODE END 0 */
 
 CAN_HandleTypeDef hcan1;
@@ -54,7 +60,27 @@ void MX_CAN1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN CAN1_Init 2 */
+	canfil.FilterBank = 0;
+	canfil.FilterMode = CAN_FILTERMODE_IDMASK;
+	canfil.FilterFIFOAssignment = CAN_RX_FIFO0;
+	canfil.FilterIdHigh = 0;
+	canfil.FilterIdLow = 0;
+	canfil.FilterMaskIdHigh = 0;
+	canfil.FilterMaskIdLow = 0;
+	canfil.FilterScale = CAN_FILTERSCALE_32BIT;
+	canfil.FilterActivation = ENABLE;
+	canfil.SlaveStartFilterBank = 14;
 
+	txHeader.DLC = 8;
+	txHeader.IDE = CAN_ID_STD;
+	txHeader.RTR = CAN_RTR_DATA;
+	txHeader.StdId = 0x300;
+	txHeader.ExtId = 0x02;
+	txHeader.TransmitGlobalTime = DISABLE;
+
+	HAL_CAN_ConfigFilter(&hcan1, &canfil);
+	HAL_CAN_Start(&hcan1);
+	HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
   /* USER CODE END CAN1_Init 2 */
 
 }
@@ -84,13 +110,13 @@ void HAL_CAN_MspInit(CAN_HandleTypeDef* canHandle)
     HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
     /* CAN1 interrupt Init */
-    HAL_NVIC_SetPriority(CAN1_TX_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(CAN1_TX_IRQn, 5, 0);
     HAL_NVIC_EnableIRQ(CAN1_TX_IRQn);
-    HAL_NVIC_SetPriority(CAN1_RX0_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(CAN1_RX0_IRQn, 5, 0);
     HAL_NVIC_EnableIRQ(CAN1_RX0_IRQn);
-    HAL_NVIC_SetPriority(CAN1_RX1_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(CAN1_RX1_IRQn, 5, 0);
     HAL_NVIC_EnableIRQ(CAN1_RX1_IRQn);
-    HAL_NVIC_SetPriority(CAN1_SCE_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(CAN1_SCE_IRQn, 5, 0);
     HAL_NVIC_EnableIRQ(CAN1_SCE_IRQn);
   /* USER CODE BEGIN CAN1_MspInit 1 */
 
@@ -127,5 +153,47 @@ void HAL_CAN_MspDeInit(CAN_HandleTypeDef* canHandle)
 }
 
 /* USER CODE BEGIN 1 */
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+{
+	HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rxHeader, canRX);
+	HAL_GPIO_TogglePin(LD4_GPIO_Port, LD4_Pin);
+	flagRecv = 1;
+}
 
+void canStartDefaultTask(void *argument)
+{
+	/* init code for USB_HOST */
+
+	/* USER CODE BEGIN StartDefaultTask */
+	uint8_t csend[] =
+	{ 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 };
+	/* Infinite loop */
+	for (;;)
+	{
+		csend[1] += 1;
+		csend[2] = 0x03;
+		csend[3] = 0x04;
+		csend[4] = 0x05;
+		csend[5] = 0x06;
+		csend[6] = 0x07;
+		csend[7] = 0x08;
+		txHeader.StdId = 0x300;
+		HAL_CAN_AddTxMessage(&hcan1, &txHeader, csend, &canMailbox);
+		if (flagRecv)
+		{
+			flagRecv = 0;
+			txHeader.StdId = rxHeader.StdId + 1;
+			csend[0] += 1;
+			csend[2] = canRX[2];
+			csend[3] = canRX[3];
+			csend[4] = canRX[4];
+			csend[5] = canRX[5];
+			csend[6] = canRX[6];
+			csend[7] = canRX[7];
+			HAL_CAN_AddTxMessage(&hcan1, &txHeader, csend, &canMailbox);
+		}
+		osDelay(1000);
+	}
+	/* USER CODE END StartDefaultTask */
+}
 /* USER CODE END 1 */

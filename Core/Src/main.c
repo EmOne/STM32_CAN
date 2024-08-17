@@ -18,9 +18,15 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "cmsis_os.h"
 #include "can.h"
+#include "crc.h"
+#include "fatfs.h"
 #include "i2c.h"
 #include "i2s.h"
+#include "mbedtls.h"
+#include "rng.h"
+#include "rtc.h"
 #include "spi.h"
 #include "usb_host.h"
 #include "gpio.h"
@@ -48,31 +54,19 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-CAN_RxHeaderTypeDef rxHeader; //CAN Bus Transmit Header
-CAN_TxHeaderTypeDef txHeader; //CAN Bus Receive Header
-uint8_t canRX[8] =
-{ 0, 0, 0, 0, 0, 0, 0, 0 };  //CAN Bus Receive Buffer
-CAN_FilterTypeDef canfil; //CAN Bus Filter
-uint32_t canMailbox; //CAN Bus Mail box variable
-uint8_t flagRecv = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-void MX_USB_HOST_Process(void);
-
+void MX_FREERTOS_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
-{
-	HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rxHeader, canRX);
-	HAL_GPIO_TogglePin(LD4_GPIO_Port, LD4_Pin);
-	flagRecv = 1;
-}
+
 /* USER CODE END 0 */
 
 /**
@@ -107,63 +101,33 @@ int main(void)
   MX_I2C1_Init();
   MX_I2S3_Init();
   MX_SPI1_Init();
-  MX_USB_HOST_Init();
   MX_CAN1_Init();
+  MX_CRC_Init();
+  MX_RNG_Init();
+  MX_RTC_Init();
+  MX_FATFS_Init();
+  /* Call PreOsInit function */
+  MX_MBEDTLS_Init();
   /* USER CODE BEGIN 2 */
-	canfil.FilterBank = 0;
-	canfil.FilterMode = CAN_FILTERMODE_IDMASK;
-	canfil.FilterFIFOAssignment = CAN_RX_FIFO0;
-	canfil.FilterIdHigh = 0;
-	canfil.FilterIdLow = 0;
-	canfil.FilterMaskIdHigh = 0;
-	canfil.FilterMaskIdLow = 0;
-	canfil.FilterScale = CAN_FILTERSCALE_32BIT;
-	canfil.FilterActivation = ENABLE;
-	canfil.SlaveStartFilterBank = 14;
 
-	txHeader.DLC = 8;
-	txHeader.IDE = CAN_ID_STD;
-	txHeader.RTR = CAN_RTR_DATA;
-	txHeader.StdId = 0x030;
-	txHeader.ExtId = 0x02;
-	txHeader.TransmitGlobalTime = DISABLE;
-
-	HAL_CAN_ConfigFilter(&hcan1, &canfil);
-	HAL_CAN_Start(&hcan1);
-	HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
   /* USER CODE END 2 */
+
+  /* Init scheduler */
+  osKernelInitialize();
+
+  /* Call init function for freertos objects (in cmsis_os2.c) */
+  MX_FREERTOS_Init();
+
+  /* Start scheduler */
+  osKernelStart();
+
+  /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-	uint8_t csend[] =
-	{ 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 };
   while (1)
   {
-		csend[1] += 1;
-		csend[2] = 0x03;
-		csend[3] = 0x04;
-		csend[4] = 0x05;
-		csend[5] = 0x06;
-		csend[6] = 0x07;
-		csend[7] = 0x08;
-		txHeader.StdId = 0x030;
-		HAL_CAN_AddTxMessage(&hcan1, &txHeader, csend, &canMailbox);
-		if (flagRecv)
-		{
-			flagRecv = 0;
-			txHeader.StdId = rxHeader.StdId + 1;
-			csend[0] += 1;
-			csend[2] = canRX[2];
-			csend[3] = canRX[3];
-			csend[4] = canRX[4];
-			csend[5] = canRX[5];
-			csend[6] = canRX[6];
-			csend[7] = canRX[7];
-			HAL_CAN_AddTxMessage(&hcan1, &txHeader, csend, &canMailbox);
-		}
-		HAL_Delay(1000);
     /* USER CODE END WHILE */
-    MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
   }
@@ -187,8 +151,9 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI|RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 8;
@@ -218,6 +183,27 @@ void SystemClock_Config(void)
 /* USER CODE BEGIN 4 */
 
 /* USER CODE END 4 */
+
+/**
+  * @brief  Period elapsed callback in non blocking mode
+  * @note   This function is called  when TIM9 interrupt took place, inside
+  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
+  * a global variable "uwTick" used as application time base.
+  * @param  htim : TIM handle
+  * @retval None
+  */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  /* USER CODE BEGIN Callback 0 */
+
+  /* USER CODE END Callback 0 */
+  if (htim->Instance == TIM9) {
+    HAL_IncTick();
+  }
+  /* USER CODE BEGIN Callback 1 */
+
+  /* USER CODE END Callback 1 */
+}
 
 /**
   * @brief  This function is executed in case of error occurrence.
