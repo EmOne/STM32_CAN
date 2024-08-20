@@ -45,7 +45,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
-
+evState_t ev;
 /* USER CODE END Variables */
 /* Definitions for defaultTask */
 osThreadId_t defaultTaskHandle;
@@ -96,11 +96,12 @@ void MX_FREERTOS_Init(void) {
 
   /* Create the thread(s) */
   /* creation of defaultTask */
-  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+	defaultTaskHandle = osThreadNew(StartDefaultTask, &ev,
+			&defaultTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
-	canDefaultTaskHandle = osThreadNew(canStartDefaultTask, NULL,
+	canDefaultTaskHandle = osThreadNew(canStartDefaultTask, &ev,
 			&canDefaultTask_attributes);
   /* USER CODE END RTOS_THREADS */
 
@@ -126,7 +127,29 @@ void StartDefaultTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-
+		//Event cur_event = event_check();
+		//		switch(currentMode) {
+		//			case POST:
+		//				currentMode = POST_function(cur_event);
+		//				break;
+		//			case IDLE:
+		//				currentMode = IDLE_function(cur_event);
+		//				break;
+		//			case SETTING:
+		//				currentMode = SETTING_function(cur_event);
+		//				break;
+		//			case RUNNING:
+		//				currentMode = RUNNING_function(cur_event);
+		//				break;
+		//			case ALARM:
+		//				currentMode = ALARM_function(cur_event);
+		//				break;
+		//			case FAILSAFE:
+		//				currentMode = FAILSAFE_function(cur_event);
+		//				break;
+		//			default:
+		//				currentMode = currentMode;
+		//		}
     osDelay(1);
   }
   /* USER CODE END StartDefaultTask */

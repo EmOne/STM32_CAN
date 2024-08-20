@@ -28,6 +28,7 @@ uint8_t canRX[8] =
 CAN_FilterTypeDef canfil; //CAN Bus Filter
 uint32_t canMailbox; //CAN Bus Mail box variable
 uint8_t flagRecv = 0;
+Event currentMode;
 /* USER CODE END 0 */
 
 CAN_HandleTypeDef hcan1;
@@ -63,10 +64,10 @@ void MX_CAN1_Init(void)
 	canfil.FilterBank = 0;
 	canfil.FilterMode = CAN_FILTERMODE_IDMASK;
 	canfil.FilterFIFOAssignment = CAN_RX_FIFO0;
-	canfil.FilterIdHigh = 0;
-	canfil.FilterIdLow = 0;
-	canfil.FilterMaskIdHigh = 0;
-	canfil.FilterMaskIdLow = 0;
+	canfil.FilterIdHigh = 0x02FF;
+	canfil.FilterIdLow = 0x0200;
+	canfil.FilterMaskIdHigh = 0xF0F0;
+	canfil.FilterMaskIdLow = 0xF0F0;
 	canfil.FilterScale = CAN_FILTERSCALE_32BIT;
 	canfil.FilterActivation = ENABLE;
 	canfil.SlaveStartFilterBank = 14;
@@ -75,8 +76,8 @@ void MX_CAN1_Init(void)
 	txHeader.IDE = CAN_ID_STD;
 	txHeader.RTR = CAN_RTR_DATA;
 	txHeader.StdId = 0x300;
-	txHeader.ExtId = 0x02;
-	txHeader.TransmitGlobalTime = DISABLE;
+	txHeader.ExtId = 0x200;
+	txHeader.TransmitGlobalTime = ENABLE;
 
 	HAL_CAN_ConfigFilter(&hcan1, &canfil);
 	HAL_CAN_Start(&hcan1);
@@ -162,14 +163,35 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 
 void canStartDefaultTask(void *argument)
 {
-	/* init code for USB_HOST */
-
-	/* USER CODE BEGIN StartDefaultTask */
 	uint8_t csend[] =
 	{ 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 };
 	/* Infinite loop */
+	osEvent evCan;
 	for (;;)
 	{
+		Event cur_event = event_check();
+		//		switch(currentMode) {
+		//			case POST:
+		//				currentMode = POST_function(cur_event);
+		//				break;
+		//			case IDLE:
+		//				currentMode = IDLE_function(cur_event);
+		//				break;
+		//			case SETTING:
+		//				currentMode = SETTING_function(cur_event);
+		//				break;
+		//			case RUNNING:
+		//				currentMode = RUNNING_function(cur_event);
+		//				break;
+		//			case ALARM:
+		//				currentMode = ALARM_function(cur_event);
+		//				break;
+		//			case FAILSAFE:
+		//				currentMode = FAILSAFE_function(cur_event);
+		//				break;
+		//			default:
+		//				currentMode = currentMode;
+		//		}
 		csend[1] += 1;
 		csend[2] = 0x03;
 		csend[3] = 0x04;
@@ -194,6 +216,5 @@ void canStartDefaultTask(void *argument)
 		}
 		osDelay(1000);
 	}
-	/* USER CODE END StartDefaultTask */
 }
 /* USER CODE END 1 */

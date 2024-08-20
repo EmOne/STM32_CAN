@@ -36,7 +36,23 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
+typedef enum eMode
+{
+	POST, IDLE, SETTING, RUNNING, WAITING, ALARM, FAILSAFE
+} Mode;
 
+typedef enum eEvent
+{
+	EV_NONE, EV_OUTPUT_ERR, EV_COMMU_ERR, EV_SENSOR_ERR
+} Event;
+
+typedef struct
+{
+	Mode output;
+	Mode commu;
+	Mode sensor;
+	Mode tracking;
+} evState_t;
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/
@@ -53,7 +69,8 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-
+extern int __io_putchar(int ch) __attribute__((weak));
+extern int __io_getchar(void) __attribute__((weak));
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
@@ -126,6 +143,8 @@ void Error_Handler(void);
 
 /* USER CODE BEGIN Private defines */
 extern uint8_t canRX[];
+extern volatile Mode currentMode;
+extern int errno;
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus
