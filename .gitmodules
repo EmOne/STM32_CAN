@@ -1,0 +1,4 @@
+[submodule "Middlewares/Third_Party/libcsp"]
+	path = Middlewares/Third_Party/libcsp
+	url = git@github.com:EmOne/libcsp.git
+	branch = aiim
