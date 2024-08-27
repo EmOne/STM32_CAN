@@ -28,7 +28,7 @@ uint8_t canRX[8] =
 CAN_FilterTypeDef canfil; //CAN Bus Filter
 uint32_t canMailbox; //CAN Bus Mail box variable
 uint8_t flagRecv = 0;
-Event currentMode;
+Mode *currentMode;
 /* USER CODE END 0 */
 
 CAN_HandleTypeDef hcan1;
@@ -64,24 +64,25 @@ void MX_CAN1_Init(void)
 	canfil.FilterBank = 0;
 	canfil.FilterMode = CAN_FILTERMODE_IDMASK;
 	canfil.FilterFIFOAssignment = CAN_RX_FIFO0;
-	canfil.FilterIdHigh = 0x02FF;
-	canfil.FilterIdLow = 0x0200;
-	canfil.FilterMaskIdHigh = 0xF0F0;
-	canfil.FilterMaskIdLow = 0xF0F0;
+	canfil.FilterIdHigh = 0xFFFFFFFF;
+	canfil.FilterIdLow = 0xFFFFFFFF;
+	canfil.FilterMaskIdHigh = 0x00000000;
+	canfil.FilterMaskIdLow = 0x00000000;
 	canfil.FilterScale = CAN_FILTERSCALE_32BIT;
 	canfil.FilterActivation = ENABLE;
 	canfil.SlaveStartFilterBank = 14;
+	HAL_CAN_ConfigFilter(&hcan1, &canfil);
 
 	txHeader.DLC = 8;
 	txHeader.IDE = CAN_ID_STD;
 	txHeader.RTR = CAN_RTR_DATA;
 	txHeader.StdId = 0x300;
-	txHeader.ExtId = 0x200;
+	txHeader.ExtId = 0x100;
 	txHeader.TransmitGlobalTime = ENABLE;
-
-	HAL_CAN_ConfigFilter(&hcan1, &canfil);
 	HAL_CAN_Start(&hcan1);
-	HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
+
+	HAL_CAN_ActivateNotification(&hcan1,
+	CAN_IT_RX_FIFO0_MSG_PENDING);
   /* USER CODE END CAN1_Init 2 */
 
 }
@@ -154,11 +155,31 @@ void HAL_CAN_MspDeInit(CAN_HandleTypeDef* canHandle)
 }
 
 /* USER CODE BEGIN 1 */
+
+void HAL_CAN_RxFifo0FullCallback(CAN_HandleTypeDef *hcan)
+{
+	if (hcan != NULL)
+	{
+		if (hcan->Instance == CAN1)
+		{
+		}
+	}
+}
+
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
-	HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rxHeader, canRX);
-	HAL_GPIO_TogglePin(LD4_GPIO_Port, LD4_Pin);
-	flagRecv = 1;
+	if (hcan != NULL)
+	{
+		if (hcan->Instance == CAN1)
+		{
+			HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rxHeader, canRX);
+			HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
+//			portENTER_CRITICAL();
+			flagRecv = 1;
+//			portEXIT_CRITICAL();
+		}
+	}
+
 }
 
 void canStartDefaultTask(void *argument)
@@ -166,55 +187,92 @@ void canStartDefaultTask(void *argument)
 	uint8_t csend[] =
 	{ 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 };
 	/* Infinite loop */
-	osEvent evCan;
+	static uint16_t seq = 0;
+	uint8_t fR = 0;
+	currentMode = &((evState_t*) argument)->comm;
+
 	for (;;)
 	{
-		Event cur_event = event_check();
-		//		switch(currentMode) {
-		//			case POST:
-		//				currentMode = POST_function(cur_event);
-		//				break;
-		//			case IDLE:
-		//				currentMode = IDLE_function(cur_event);
-		//				break;
-		//			case SETTING:
-		//				currentMode = SETTING_function(cur_event);
-		//				break;
-		//			case RUNNING:
-		//				currentMode = RUNNING_function(cur_event);
-		//				break;
-		//			case ALARM:
-		//				currentMode = ALARM_function(cur_event);
-		//				break;
-		//			case FAILSAFE:
-		//				currentMode = FAILSAFE_function(cur_event);
-		//				break;
-		//			default:
-		//				currentMode = currentMode;
-		//		}
-		csend[1] += 1;
-		csend[2] = 0x03;
-		csend[3] = 0x04;
-		csend[4] = 0x05;
-		csend[5] = 0x06;
-		csend[6] = 0x07;
-		csend[7] = 0x08;
-		txHeader.StdId = 0x300;
-		HAL_CAN_AddTxMessage(&hcan1, &txHeader, csend, &canMailbox);
-		if (flagRecv)
+//		Event cur_event = event_check();
+		switch (*currentMode)
 		{
-			flagRecv = 0;
-			txHeader.StdId = rxHeader.StdId + 1;
-			csend[0] += 1;
-			csend[2] = canRX[2];
-			csend[3] = canRX[3];
-			csend[4] = canRX[4];
-			csend[5] = canRX[5];
-			csend[6] = canRX[6];
-			csend[7] = canRX[7];
-			HAL_CAN_AddTxMessage(&hcan1, &txHeader, csend, &canMailbox);
+		case POST:
+		//				currentMode = POST_function(cur_event);
+			*currentMode = IDLE;
+			break;
+		case IDLE:
+		//				currentMode = IDLE_function(cur_event);
+			*currentMode = SETTING;
+			break;
+		case SETTING:
+		//				currentMode = SETTING_function(cur_event);
+			seq++;
+			csend[0] = (uint8_t) ((seq >> 8) & 0xFF);
+			csend[1] = (uint8_t) ((seq >> 0) & 0xFF);
+
+			*currentMode = RUNNING;
+			break;
+		case RUNNING:
+		//				currentMode = RUNNING_function(cur_event);
+//			portENTER_CRITICAL();
+			fR = flagRecv;
+//			portEXIT_CRITICAL();
+			if (!fR)
+				{
+				csend[2] = 0x03;
+				csend[3] = 0x04;
+				csend[4] = 0x05;
+				csend[5] = 0x06;
+				csend[6] = 0x07;
+				csend[7] = 0x08;
+				txHeader.StdId = 0x300;
+				if (HAL_CAN_AddTxMessage(&hcan1, &txHeader, csend, &canMailbox)
+						!= HAL_OK)
+				{
+					*currentMode = ALARM;
+					break;
+				}
+				}
+			else
+				{
+//				portENTER_CRITICAL();
+				flagRecv = 0;
+//				portEXIT_CRITICAL();
+				txHeader.StdId = rxHeader.StdId + 1;
+				csend[2] = canRX[2];
+				csend[3] = canRX[3];
+				csend[4] = canRX[4];
+				csend[5] = canRX[5];
+				csend[6] = canRX[6];
+				csend[7] = canRX[7];
+				if (HAL_CAN_AddTxMessage(&hcan1, &txHeader, csend, &canMailbox)
+						!= HAL_OK)
+				{
+					*currentMode = ALARM;
+					break;
+				}
+
+				}
+			*currentMode = WAITING;
+			break;
+		case WAITING:
+			osDelay(1000);
+			*currentMode = IDLE;
+			break;
+		case ALARM:
+			//				currentMode = ALARM_function(cur_event);
+			seq--;
+			*currentMode = FAILSAFE;
+			break;
+		case FAILSAFE:
+			//				currentMode = FAILSAFE_function(cur_event)
+			*currentMode = POST;
+			break;
+		default:
+			currentMode = currentMode;
+			break;
 		}
-		osDelay(1000);
+		osDelay(1);
 	}
 }
 /* USER CODE END 1 */

@@ -29,6 +29,7 @@ extern "C" {
 #include "main.h"
 
 /* USER CODE BEGIN Includes */
+#include "FreeRTOS.h"
 #include "cmsis_os.h"
 /* USER CODE END Includes */
 
