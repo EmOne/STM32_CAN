@@ -28,4 +28,6 @@ GTAGS
 build-docs
 /.cache/
 /.history/
-THUMB*
+*THUMB*
+*.hzp
+*.hzs
