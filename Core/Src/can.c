@@ -25,10 +25,57 @@ CAN_RxHeaderTypeDef rxHeader; //CAN Bus Transmit Header
 CAN_TxHeaderTypeDef txHeader; //CAN Bus Receive Header
 uint8_t canRX[8] =
 { 0, 0, 0, 0, 0, 0, 0, 0 };  //CAN Bus Receive Buffer
+uint8_t csend[8] =
+{ 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 };
 CAN_FilterTypeDef canfil; //CAN Bus Filter
 uint32_t canMailbox; //CAN Bus Mail box variable
 uint8_t flagRecv = 0;
 Mode *currentMode;
+
+/* Server port, the port the server listens on for incoming connections from the client. */
+#define MY_SERVER_PORT		10
+
+/* Commandline options */
+static uint8_t server_address = 10;
+
+/* test mode, used for verifying that host & client can exchange packets over the loopback interface */
+static bool test_mode = false;
+static unsigned int server_received = 0;
+
+extern osThreadId_t canRouterTaskHandle;
+extern osThreadId_t canServerTaskHandle;
+extern osThreadId_t canClientTaskHandle;
+//Extend CSP_DBG_ERR
+#define CSP_DBG_ERR_INVALID_CAN_CONFIG 13
+#define CONFIG_CSP_CAN_RX_MSGQ_DEPTH 10
+
+/** Driver configration */
+typedef struct
+{
+	char name[CSP_IFLIST_NAME_MAX + 1];
+	can_mode_e mode;
+	uint32_t id;
+	uint32_t id_l3bc;
+	uint32_t id_l2bc;
+	uint32_t mask;
+	csp_can_interface_data_t ifdata;
+	SemaphoreHandle_t lock;
+	StaticSemaphore_t lock_buf;
+	csp_iface_t interface;
+	CAN_HandleTypeDef *device;
+	osMessageQId rx_msgq;
+	osEvent stop_can_event;
+	osThreadId_t rx_thread;
+	uint8_t rx_msgq_buf[sizeof(CAN_FIFOMailBox_TypeDef)
+			* CONFIG_CSP_CAN_RX_MSGQ_DEPTH];
+	int filter_id;
+} can_context_t;
+
+can_context_t mcan[1] =
+{
+		{ .mode = 0, .lock = NULL, .interface =
+		{ .name = "CAN", .interface_data = &mcan[0].ifdata, .driver_data =
+				&mcan[0], }, } };
 /* USER CODE END 0 */
 
 CAN_HandleTypeDef hcan1;
@@ -51,9 +98,9 @@ void MX_CAN1_Init(void)
   hcan1.Init.TimeSeg1 = CAN_BS1_4TQ;
   hcan1.Init.TimeSeg2 = CAN_BS2_3TQ;
   hcan1.Init.TimeTriggeredMode = DISABLE;
-  hcan1.Init.AutoBusOff = DISABLE;
-  hcan1.Init.AutoWakeUp = DISABLE;
-  hcan1.Init.AutoRetransmission = DISABLE;
+  hcan1.Init.AutoBusOff = ENABLE;
+  hcan1.Init.AutoWakeUp = ENABLE;
+  hcan1.Init.AutoRetransmission = ENABLE;
   hcan1.Init.ReceiveFifoLocked = DISABLE;
   hcan1.Init.TransmitFifoPriority = DISABLE;
   if (HAL_CAN_Init(&hcan1) != HAL_OK)
@@ -155,6 +202,39 @@ void HAL_CAN_MspDeInit(CAN_HandleTypeDef* canHandle)
 }
 
 /* USER CODE BEGIN 1 */
+static int csp_can_tx_frame(void *driver_data, uint32_t id, const uint8_t *data,
+		uint8_t dlc)
+{
+
+	int ret = CSP_ERR_NONE;
+//	struct can_frame frame =
+//	{ 0 };
+	can_context_t *ctx = driver_data;
+
+	if (dlc > 8) //CAN_MAX_DLC)
+	{
+		ret = CSP_ERR_INVAL;
+		goto end;
+	}
+
+//	frame.id = id;
+//	frame.dlc = dlc;
+//	frame.flags = CAN_FRAME_IDE;
+	txHeader.StdId = id;
+	txHeader.RTR = 0;
+	txHeader.DLC = dlc;
+	txHeader.IDE = CAN_ID_STD;
+	memcpy(csend, data, dlc);
+
+//	ret = can_send(ctx->device, &frame, CSP_CAN_TX_TIME_OUT, NULL, NULL);
+	ret = HAL_CAN_AddTxMessage(ctx->device, &txHeader, csend, &canMailbox);
+	if (ret < 0)
+	{
+		printf("[%s] can_send() failed, errno %d", ctx->name, ret);
+	}
+
+	end: return ret;
+}
 
 void HAL_CAN_RxFifo0FullCallback(CAN_HandleTypeDef *hcan)
 {
@@ -168,8 +248,11 @@ void HAL_CAN_RxFifo0FullCallback(CAN_HandleTypeDef *hcan)
 
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
+	int xTaskWoken = pdFALSE;
+
 	if (hcan != NULL)
 	{
+
 		if (hcan->Instance == CAN1)
 		{
 			HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rxHeader, canRX);
@@ -177,19 +260,51 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 //			portENTER_CRITICAL();
 			flagRecv = 1;
 //			portEXIT_CRITICAL();
+
+			csp_hex_dump("rx", canRX, rxHeader.DLC);
+
+			if (rxHeader.IDE != CAN_ID_STD && rxHeader.RTR == 0)
+			{
+			/* Process frame within ISR
+			 * (This can also be deferred to a task with: csp_can_process_frame_deferred) */
+			csp_can_rx(&mcan[0].interface, rxHeader.StdId, canRX, rxHeader.DLC,
+					&xTaskWoken);
+			}
+
 		}
 	}
+	portYIELD_FROM_ISR(xTaskWoken);
 
 }
 
 void canStartDefaultTask(void *argument)
 {
-	uint8_t csend[] =
-	{ 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 };
 	/* Infinite loop */
 	static uint16_t seq = 0;
 	uint8_t fR = 0;
 	currentMode = &((evState_t*) argument)->comm;
+
+//	int ret;
+	uint8_t address = 0;
+//	const char *kiss_device = NULL;
+	const char *rtable = NULL;
+	csp_iface_t *can_iface = NULL;
+
+	printf("Initializing CSP\n");
+
+	/* Start router */
+//	router_start();
+//	osThreadResume(canRouterTaskHandle);
+
+	csp_iface_t *default_iface = NULL;
+	const char *ifname = "CAN";
+	address = 10;
+	server_address = 255;
+	const CAN_HandleTypeDef *device = &hcan1;
+	uint32_t bitrate = 125000;
+
+	uint16_t filter_addr = address;
+	uint16_t filter_mask = 0x3FFF;
 
 	for (;;)
 	{
@@ -197,11 +312,89 @@ void canStartDefaultTask(void *argument)
 		switch (*currentMode)
 		{
 		case POST:
-		//				currentMode = POST_function(cur_event);
+			//				currentMode = POST_function(cur_event)
+			int error = csp_can_open_and_add_interface(device, ifname, address,
+					bitrate, filter_addr, filter_mask, &can_iface);
+			if (error != CSP_ERR_NONE)
+			{
+				printf("failed to add CAN interface [%s], error: %d\n", ifname,
+						error);
+				*currentMode = FAILSAFE;
+				break;
+			}
+			can_iface->is_default = 1;
+			default_iface = can_iface;
+
+			if (rtable)
+			{
+				int error = csp_rtable_load(rtable);
+				if (error < 1)
+				{
+					printf("csp_rtable_load(%s) failed, error: %d", rtable,
+							error);
+					*currentMode = FAILSAFE;
+					break;
+				}
+			}
+			else if (default_iface)
+			{
+				csp_rtable_set(0, 0, default_iface, CSP_NO_VIA_ADDRESS);
+			}
+
+			if (!default_iface)
+			{
+				/* no interfaces configured - run server and client in process, using loopback interface */
+				server_address = address;
+				/* run as test mode only use loopback interface */
+				test_mode = true;
+			}
+
+			/*
+			 * In the Zephyr port, we have disabled stdio usage and unified logging with the Zephyr
+			 * logging API. As a result, the following functions currently do not print anything.
+			 */
+			printf("Connection table\n");
+			csp_conn_print_table();
+
+			printf("Interfaces\n");
+			csp_iflist_print();
+
+			printf("Route table\n");
+			csp_rtable_print();
+
+			/* Start server thread */
+//			if ((server_address == 255) || /* no server address specified, I must be server */
+//			(default_iface == NULL))
+//			{ /* no interfaces specified -> run server & client via loopback */
+//				server_start();
+//				osThreadResume(canServerTaskHandle);
+//			}
+
+			/* Start client thread */
+//			if ((server_address != 255) || /* server address specified, I must be client */
+//			(default_iface == NULL))
+//			{ /* no interfaces specified -> run server & client via loopback */
+//				client_start();
+//				osThreadResume(canClientTaskHandle);
+//			}
+
 			*currentMode = IDLE;
 			break;
 		case IDLE:
 		//				currentMode = IDLE_function(cur_event);
+			if (test_mode)
+			{
+				/* Test mode is intended for checking that host & client can exchange packets over loopback */
+				if (server_received < 5)
+				{
+					printf("Server received %u packets", server_received);
+					*currentMode = FAILSAFE;
+					break;
+				}
+				printf("Server received %u packets", server_received);
+				*currentMode = FAILSAFE;
+				break;
+			}
 			*currentMode = SETTING;
 			break;
 		case SETTING:
@@ -232,6 +425,10 @@ void canStartDefaultTask(void *argument)
 					*currentMode = ALARM;
 					break;
 				}
+				else
+				{
+					HAL_GPIO_TogglePin(LD4_GPIO_Port, LD4_Pin);
+				}
 				}
 			else
 				{
@@ -251,6 +448,10 @@ void canStartDefaultTask(void *argument)
 					*currentMode = ALARM;
 					break;
 				}
+				else
+				{
+					HAL_GPIO_TogglePin(LD4_GPIO_Port, LD4_Pin);
+				}
 
 				}
 			*currentMode = WAITING;
@@ -266,13 +467,391 @@ void canStartDefaultTask(void *argument)
 			break;
 		case FAILSAFE:
 			//				currentMode = FAILSAFE_function(cur_event)
+			csp_can_stop(can_iface);
 			*currentMode = POST;
 			break;
 		default:
-			currentMode = currentMode;
+			*currentMode = *currentMode;
 			break;
 		}
 		osDelay(1);
 	}
+}
+
+void canStartRouterTask(void *argument)
+{
+	currentMode = &((evState_t*) argument)->comm;
+	for (;;)
+	{
+//		//Event cur_event = event_check();
+//		switch (*currentMode)
+//		{
+//		case POST:
+////			currentMode = POST_function(cur_event);
+//			*currentMode = RUNNING;
+//			break;
+//		case IDLE:
+////			currentMode = IDLE_function(cur_event);
+//			break;
+//		case SETTING:
+////			currentMode = SETTING_function(cur_event);
+//			break;
+//		case RUNNING:
+//			currentMode = RUNNING_function(cur_event);
+			csp_route_work();
+//			break;
+//		case ALARM:
+////			currentMode = ALARM_function(cur_event);
+//			break;
+//		case FAILSAFE:
+////			currentMode = FAILSAFE_function(cur_event);
+//			break;
+//		default:
+//			*currentMode = *currentMode;
+//			break;
+//		}
+//		osDelay(1);
+	}
+}
+
+void canStartServerTask(void *argument)
+{
+	currentMode = &((evState_t*) argument)->comm;
+
+	printf("Server task started\n");
+	csp_socket_t sock =
+	{ 0 };
+
+	/* Bind socket to all ports, e.g. all incoming connections will be handled here */
+	csp_bind(&sock, CSP_ANY);
+
+	/* Create a backlog of 10 connections, i.e. up to 10 new connections can be queued */
+	csp_listen(&sock, 10);
+
+	for (;;)
+	{
+//		/* Wait for a new connection, 10000 mS timeout */
+		csp_conn_t *conn;
+		if ((conn = csp_accept(&sock, 10000)) == NULL)
+		{
+			/* timeout */
+			continue;
+		}
+
+		/* Read packets on connection, timout is 100 mS */
+		csp_packet_t *packet;
+		while ((packet = csp_read(conn, 50)) != NULL)
+		{
+			switch (csp_conn_dport(conn))
+			{
+			case MY_SERVER_PORT:
+				/* Process packet here */
+				printf("Packet received on MY_SERVER_PORT: %s\n",
+						(char*) packet->data);
+				csp_buffer_free(packet);
+				++server_received;
+				break;
+
+			default:
+				/* Call the default CSP service handler, handle pings, buffer use, etc. */
+				csp_service_handler(packet);
+				break;
+			}
+		}
+
+		/* Close current connection */
+		csp_close(conn);
+	}
+}
+
+/* Client task sending requests to server task */
+void canStartClientTask(void *argument)
+{
+	currentMode = &((evState_t*) argument)->comm;
+	printf("Client task started\n");
+
+	unsigned int count = 'A';
+	uint16_t server_addr = 10;
+
+	for (;;)
+	{
+		//		k_sleep(test_mode ? K_USEC(200000) : K_USEC(1000000));
+		osDelay(test_mode ? 200 : 1000);
+
+		/* Send ping to server, timeout 1000 mS, ping size 100 bytes */
+		int result = csp_ping(server_addr, 1000, 100, CSP_O_NONE);
+		printf("Ping address: %u, result %d [mS]\n", server_addr, result);
+
+		if (result == -1)
+		{
+			/* Send reboot request to server, the server has no actual implementation of csp_sys_reboot() and fails to reboot */
+			csp_reboot(server_addr);
+			printf("reboot system request sent to address: %u\n", server_addr);
+		}
+		/* Send data packet (string) to server */
+
+		/* 1. Connect to host on 'server_address', port MY_SERVER_PORT with regular UDP-like protocol and 1000 ms timeout */
+		csp_conn_t *conn = csp_connect(CSP_PRIO_NORM, server_addr,
+		MY_SERVER_PORT, 1000, CSP_O_NONE);
+		if (conn == NULL)
+		{
+			/* Connect failed */
+			printf("Connection failed\n");
+			return;
+		}
+
+		/* 2. Get packet buffer for message/data */
+		csp_packet_t *packet = csp_buffer_get(0);
+		if (packet == NULL)
+		{
+			/* Could not get buffer element */
+			printf("Failed to get CSP buffer\n");
+			return;
+		}
+
+		/* 3. Copy data to packet */
+		memcpy(packet->data, "Hello world ", 12);
+		memcpy(packet->data + 12, &count, 1);
+		memset(packet->data + 13, 0, 1);
+		count++;
+
+		/* 4. Set packet length */
+		packet->length = (strlen((char*) packet->data) + 1); /* include the 0 termination */
+
+		/* 5. Send packet */
+		csp_send(conn, packet);
+
+		/* 6. Close connection */
+		csp_close(conn);
+
+	}
+}
+
+/**
+ * Open CAN and add CSP interface.
+ */
+int csp_can_open_and_add_interface(const CAN_HandleTypeDef *device,
+		const char *ifname, uint16_t address, uint32_t bitrate,
+		uint16_t filter_addr, uint16_t filter_mask, csp_iface_t **return_iface)
+{
+	int ret;
+//	osThreadId_t rx_tid;
+	can_context_t *ctx = &mcan[0];
+	const char *name = ifname ? ifname : mcan[0].name;
+
+	if (device == NULL)
+	{
+		ret = CSP_ERR_INVAL;
+		goto end;
+	}
+
+//	if (rx_thread_idx >= CONFIG_CSP_CAN_RX_THREAD_NUM)
+//	{
+//		LOG_ERR(
+//				"[%s] No more RX thread can be created. (MAX: %d) Please check CONFIG_CSP_CAN_RX_THREAD_NUM.",
+//				name, CONFIG_CSP_CAN_RX_THREAD_NUM);
+//		ret = CSP_ERR_DRIVER;
+//		goto end;
+//	}
+
+	/*
+	 * TODO:
+	 * In the current implementation, we use k_alloc() to allocate the memory
+	 * for CAN context like socketcan implementation.
+	 * However, we plan to remove dynamic memory allocations as described in
+	 * the issue below.
+	 * - https://github.com/libcsp/libcsp/issues/460
+	 * And in Zephyr, the default heap memory size is 0, so we need to set a
+	 * value using CONFIG_HEAP_MEM_POOL_SIZE.
+	 */
+//	ctx = calloc(1, sizeof(can_context_t));
+//	if (ctx == NULL)
+//	{
+//		LOG_ERR("[%s] Failed to allocate %zu bytes from the system heap", name,
+//				sizeof(can_context_t));
+//		ret = CSP_ERR_NOMEM;
+//		goto end;
+//	}
+
+	/* Set the each parameter to CAN context. */
+	strncpy(ctx->name, name, sizeof(ctx->name) - 1);
+	ctx->interface.name = ctx->name;
+	ctx->interface.addr = address;
+	ctx->interface.interface_data = &ctx->ifdata;
+	ctx->interface.driver_data = ctx;
+	ctx->ifdata.tx_func = csp_can_tx_frame;
+	ctx->ifdata.pbufs = NULL;
+	ctx->device = (CAN_HandleTypeDef*) device;
+	ctx->filter_id = -1;
+//	ctx->stop_can_event = osEventFlagsNew((osEventFlagsAttr_t*
+//			)
+//			{ 0 });
+
+	printf(
+			"INIT %s: device, local address: %d, bitrate: %ld: filter add: %d, filter mask: 0x%04x\n",
+			ctx->name, address, bitrate, filter_addr,
+			filter_mask);
+
+	/* Initialize the RX message queue */
+//	k_msgq_init(&ctx->rx_msgq, ctx->rx_msgq_buf, sizeof(struct can_frame),
+//			CONFIG_CSP_CAN_RX_MSGQ_DEPTH);
+
+	/* Set Bit rate */
+//	ret = can_set_bitrate(device, bitrate);
+//	if (ret < 0)
+//	{
+//		LOG_ERR("[%s] can_set_bitrate() failed, error: %d", ctx->name, ret);
+//		goto cleanup_heap;
+//	}
+
+	/* Set RX filter */
+//	ret = csp_can_set_rx_filter(&ctx->interface, filter_addr, filter_mask);
+//	if (ret < 0)
+//	{
+//		LOG_ERR("[%s] csp_can_add_rx_filter() failed, error: %d", ctx->name,
+//				ret);
+//		goto cleanup_heap;
+//	}
+
+	/* Add interface to CSP */
+	ret = csp_can_add_interface(&ctx->interface);
+	if (ret != CSP_ERR_NONE)
+	{
+		printf("[%s] csp_can_add_interface() failed, error: %d", ctx->name,
+				ret);
+		return ret; //goto cleanup_filter;
+	}
+
+	/* Create receive thread */
+//	rx_tid = k_thread_create(&ctx->rx_thread, rx_stack[rx_thread_idx],
+//			K_THREAD_STACK_SIZEOF(rx_stack[rx_thread_idx]),
+//			(k_thread_entry_t) csp_can_rx_thread, &ctx->rx_msgq, &ctx->iface,
+//			&ctx->stop_can_event, CONFIG_CSP_CAN_RX_THREAD_PRIORITY, 0,
+//			K_NO_WAIT);
+//	if (!rx_tid)
+//	{
+//		LOG_ERR("[%s] k_thread_create() failed", ctx->name);
+//		ret = CSP_ERR_DRIVER;
+//		goto cleanup_iface;
+//	}
+//	rx_thread_idx++;
+
+	/* Enable CAN */
+//	ret = HAL_CAN_Start((CAN_HandleTypeDef*) device);
+//	if (ret < 0)
+//	{
+//		printf("[%s] can_start() failed, error: %d", ctx->name, ret);
+//		return ret; //goto cleanup_thread;
+//	}
+
+	if (return_iface)
+	{
+		*return_iface = &ctx->interface;
+	}
+
+	return ret;
+
+	/*
+	 * The following section is for restoring acquired resources when
+	 * something fails. Unfortunately, we can't take any action if the
+	 * restoration process fails, so we proceed with the remaining
+	 * cleanup. In addtion to this, we've chosen not to restore the
+	 * CAN bit rate. If this causes any issues, please open an issue
+	 * on GitHub.
+	 */
+//	cleanup_thread: //(void) csp_can_finish_rx_thread(ctx);
+
+//	cleanup_iface: (void) csp_can_remove_interface(&ctx->interface);
+
+//	cleanup_filter: //csp_can_remove_rx_filter(ctx);
+
+//	cleanup_heap: free(ctx);
+
+	end: return ret;
+}
+
+/**
+ * Set CAN RX filter based on destination address and bit mask.
+ */
+int csp_can_set_rx_filter(csp_iface_t *iface, uint16_t filter_addr,
+		uint16_t filter_mask)
+{
+	int ret = 0;
+//	struct can_filter filter =
+//	{ .flags = CAN_FILTER_IDE, };
+	can_context_t *ctx;
+
+	if ((iface == NULL) || (iface->driver_data == NULL))
+	{
+		ret = CSP_ERR_INVAL;
+		goto end;
+	}
+
+	ctx = iface->driver_data;
+
+	/* If a filter is already set, delete it. */
+	if (ctx->filter_id >= 0)
+	{
+//		can_remove_rx_filter(ctx->device, ctx->filter_id);
+	}
+
+	if (csp_conf.version == 1)
+	{
+//		filter.id = CFP_MAKE_DST(filter_addr);
+//		filter.mask = CFP_MAKE_DST(filter_mask);
+	}
+	else
+	{
+//		filter.id = filter_addr << CFP2_DST_OFFSET;
+//		filter.mask = filter_mask << CFP2_DST_OFFSET;
+	}
+
+//	ret = can_add_rx_filter_msgq(ctx->device, &ctx->rx_msgq, &filter);
+//	if (ret < 0)
+//	{
+//		LOG_ERR("[%s] can_add_rx_filter_msgq() failed, error: %d", iface->name,
+//				ctx->filter_id);
+//		goto end;
+//	}
+	ctx->filter_id = ret;
+
+	end: return ret;
+}
+
+/**
+ * Stop the CAN and RX thread
+ */
+int csp_can_stop(csp_iface_t *iface)
+{
+	int ret;
+	can_context_t *ctx;
+
+	if ((iface == NULL) || (iface->driver_data == NULL))
+	{
+		ret = CSP_ERR_INVAL;
+		goto end;
+	}
+
+	ctx = iface->driver_data;
+
+	ret = HAL_CAN_Stop(ctx->device);
+	if (ret < 0)
+	{
+		printf(
+				"[%s] can_stop() failed, but will continue the cleannp. error: %d",
+				iface->name, ret);
+	}
+
+//	(void) csp_can_finish_rx_thread(ctx);
+
+	(void) csp_can_remove_interface(&ctx->interface);
+
+//	csp_can_remove_rx_filter(ctx);
+
+	printf("Stop CAN interface: %s. ret: %d", iface->name, ret);
+
+//	free(ctx);
+
+	end: return ret;
 }
 /* USER CODE END 1 */
