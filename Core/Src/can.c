@@ -23,9 +23,9 @@
 /* USER CODE BEGIN 0 */
 CAN_RxHeaderTypeDef rxHeader; //CAN Bus Transmit Header
 CAN_TxHeaderTypeDef txHeader; //CAN Bus Receive Header
-uint8_t canRX[8] =
+uint8_t canRX[32] =
 { 0, 0, 0, 0, 0, 0, 0, 0 };  //CAN Bus Receive Buffer
-uint8_t csend[8] =
+uint8_t csend[32] =
 { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 };
 CAN_FilterTypeDef canfil; //CAN Bus Filter
 uint32_t canMailbox; //CAN Bus Mail box variable
@@ -36,7 +36,7 @@ Mode *currentMode;
 #define MY_SERVER_PORT		10
 
 /* Commandline options */
-static uint8_t server_address = 10;
+static uint8_t server_address = 11;
 
 /* test mode, used for verifying that host & client can exchange packets over the loopback interface */
 static bool test_mode = false;
@@ -202,40 +202,6 @@ void HAL_CAN_MspDeInit(CAN_HandleTypeDef* canHandle)
 }
 
 /* USER CODE BEGIN 1 */
-static int csp_can_tx_frame(void *driver_data, uint32_t id, const uint8_t *data,
-		uint8_t dlc)
-{
-
-	int ret = CSP_ERR_NONE;
-//	struct can_frame frame =
-//	{ 0 };
-	can_context_t *ctx = driver_data;
-
-	if (dlc > 8) //CAN_MAX_DLC)
-	{
-		ret = CSP_ERR_INVAL;
-		goto end;
-	}
-
-//	frame.id = id;
-//	frame.dlc = dlc;
-//	frame.flags = CAN_FRAME_IDE;
-	txHeader.StdId = id;
-	txHeader.RTR = 0;
-	txHeader.DLC = dlc;
-	txHeader.IDE = CAN_ID_STD;
-	memcpy(csend, data, dlc);
-
-//	ret = can_send(ctx->device, &frame, CSP_CAN_TX_TIME_OUT, NULL, NULL);
-	ret = HAL_CAN_AddTxMessage(ctx->device, &txHeader, csend, &canMailbox);
-	if (ret < 0)
-	{
-		printf("[%s] can_send() failed, errno %d", ctx->name, ret);
-	}
-
-	end: return ret;
-}
-
 void HAL_CAN_RxFifo0FullCallback(CAN_HandleTypeDef *hcan)
 {
 	if (hcan != NULL)
@@ -249,30 +215,33 @@ void HAL_CAN_RxFifo0FullCallback(CAN_HandleTypeDef *hcan)
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
 	int xTaskWoken = pdFALSE;
-
+//	HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_SET);
 	if (hcan != NULL)
 	{
 
 		if (hcan->Instance == CAN1)
 		{
 			HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rxHeader, canRX);
-			HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
+
 //			portENTER_CRITICAL();
 			flagRecv = 1;
 //			portEXIT_CRITICAL();
 
-			csp_hex_dump("rx", canRX, rxHeader.DLC);
+//			csp_hex_dump("rx", canRX, rxHeader.DLC);
 
 			if (rxHeader.IDE != CAN_ID_STD && rxHeader.RTR == 0)
 			{
 			/* Process frame within ISR
 			 * (This can also be deferred to a task with: csp_can_process_frame_deferred) */
-			csp_can_rx(&mcan[0].interface, rxHeader.StdId, canRX, rxHeader.DLC,
+				csp_can_rx(&mcan[0].interface, rxHeader.ExtId, canRX,
+						rxHeader.DLC,
 					&xTaskWoken);
 			}
 
 		}
 	}
+//	HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_TogglePin(LD6_GPIO_Port, LD6_Pin);
 	portYIELD_FROM_ISR(xTaskWoken);
 
 }
@@ -293,13 +262,16 @@ void canStartDefaultTask(void *argument)
 	printf("Initializing CSP\n");
 
 	/* Start router */
+	/* Init CSP */
+	csp_init();
+
 //	router_start();
-//	osThreadResume(canRouterTaskHandle);
+	osThreadResume(canRouterTaskHandle);
 
 	csp_iface_t *default_iface = NULL;
 	const char *ifname = "CAN";
 	address = 10;
-	server_address = 255;
+	server_address = 11;
 	const CAN_HandleTypeDef *device = &hcan1;
 	uint32_t bitrate = 125000;
 
@@ -367,7 +339,7 @@ void canStartDefaultTask(void *argument)
 //			(default_iface == NULL))
 //			{ /* no interfaces specified -> run server & client via loopback */
 //				server_start();
-//				osThreadResume(canServerTaskHandle);
+			osThreadResume(canServerTaskHandle);
 //			}
 
 			/* Start client thread */
@@ -375,7 +347,7 @@ void canStartDefaultTask(void *argument)
 //			(default_iface == NULL))
 //			{ /* no interfaces specified -> run server & client via loopback */
 //				client_start();
-//				osThreadResume(canClientTaskHandle);
+			osThreadResume(canClientTaskHandle);
 //			}
 
 			*currentMode = IDLE;
@@ -395,7 +367,7 @@ void canStartDefaultTask(void *argument)
 				*currentMode = FAILSAFE;
 				break;
 			}
-			*currentMode = SETTING;
+//			*currentMode = SETTING;
 			break;
 		case SETTING:
 		//				currentMode = SETTING_function(cur_event);
@@ -574,7 +546,7 @@ void canStartClientTask(void *argument)
 	printf("Client task started\n");
 
 	uint16_t count = 0;
-	uint16_t server_addr = 10;
+	uint16_t server_addr = 11;
 
 	for (;;)
 	{
@@ -637,6 +609,7 @@ void canStartClientTask(void *argument)
 		/* 6. Close connection */
 		csp_close(conn);
 
+		HAL_GPIO_TogglePin(LD4_GPIO_Port, LD4_Pin);
 	}
 }
 
@@ -718,13 +691,14 @@ int csp_can_open_and_add_interface(const CAN_HandleTypeDef *device,
 //	}
 
 	/* Set RX filter */
-//	ret = csp_can_set_rx_filter(&ctx->interface, filter_addr, filter_mask);
-//	if (ret < 0)
-//	{
-//		LOG_ERR("[%s] csp_can_add_rx_filter() failed, error: %d", ctx->name,
-//				ret);
+	ret = csp_can_set_rx_filter(&ctx->interface, filter_addr, filter_mask);
+	if (ret < 0)
+	{
+		printf("[%s] csp_can_add_rx_filter() failed, error: %d", ctx->name,
+				ret);
 //		goto cleanup_heap;
-//	}
+		return ret;
+	}
 
 	/* Add interface to CSP */
 	ret = csp_can_add_interface(&ctx->interface);
@@ -790,8 +764,7 @@ int csp_can_set_rx_filter(csp_iface_t *iface, uint16_t filter_addr,
 		uint16_t filter_mask)
 {
 	int ret = 0;
-//	struct can_filter filter =
-//	{ .flags = CAN_FILTER_IDE, };
+	CAN_FilterTypeDef *filter = &canfil;
 	can_context_t *ctx;
 
 	if ((iface == NULL) || (iface->driver_data == NULL))
@@ -866,5 +839,41 @@ int csp_can_stop(csp_iface_t *iface)
 //	free(ctx);
 
 	end: return ret;
+}
+
+int csp_can_tx_frame(void *driver_data, uint32_t id, const uint8_t *data,
+		uint8_t dlc)
+{
+	uint8_t buf[32] =
+	{ 0 };
+	int ret = CSP_ERR_NONE;
+//	struct can_frame frame =
+//	{ 0 };
+	can_context_t *ctx = driver_data;
+//	if (dlc > 8) //CAN_MAX_DLC)
+//	{
+//		ret = CSP_ERR_INVAL;
+//		goto end;
+//	}
+
+//	frame.id = id;
+//	frame.dlc = dlc;
+//	frame.flags = CAN_FRAME_IDE;
+	txHeader.StdId = 0;
+	txHeader.ExtId = id;
+	txHeader.RTR = 0;
+	txHeader.DLC = dlc;
+	txHeader.IDE = CAN_ID_EXT;
+	memcpy(buf, data, dlc);
+
+//	ret = can_send(ctx->device, &frame, CSP_CAN_TX_TIME_OUT, NULL, NULL);
+	ret = HAL_CAN_AddTxMessage(ctx->device, &txHeader, buf, &canMailbox);
+	if (ret < 0)
+	{
+		printf("[%s] can_send() failed, errno %d", ctx->name, ret);
+	}
+	HAL_GPIO_TogglePin(LD5_GPIO_Port, LD5_Pin);
+//	end:
+	return ret;
 }
 /* USER CODE END 1 */

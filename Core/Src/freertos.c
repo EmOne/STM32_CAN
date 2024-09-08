@@ -63,7 +63,7 @@ const osThreadAttr_t canDefaultTask_attributes = {
   .name = "canDefaultTask",
   .stack_size = 1024 * 4,
   .priority =
-		(osPriority_t) osPriorityLow,
+		(osPriority_t) osPriorityNormal,
 };
 /* Definitions for canRouterTask */
 osThreadId_t canRouterTaskHandle;
@@ -71,7 +71,7 @@ const osThreadAttr_t canRouterTask_attributes = {
   .name = "canRouterTask",
   .stack_size = 256 * 4,
   .priority =
-		(osPriority_t) osPriorityLow,
+		(osPriority_t) osPriorityNormal,
 };
 /* Definitions for canServerTask */
 osThreadId_t canServerTaskHandle;
@@ -79,7 +79,7 @@ const osThreadAttr_t canServerTask_attributes = {
   .name = "canServerTask",
   .stack_size = 1024 * 4,
   .priority =
-		(osPriority_t) osPriorityLow,
+		(osPriority_t) osPriorityNormal,
 };
 /* Definitions for canClientTask */
 osThreadId_t canClientTaskHandle;
@@ -87,7 +87,7 @@ const osThreadAttr_t canClientTask_attributes = {
   .name = "canClientTask",
   .stack_size = 1024 * 4,
   .priority =
-		(osPriority_t) osPriorityLow,
+		(osPriority_t) osPriorityNormal,
 };
 /* Definitions for canRxMsgQueue */
 osMessageQueueId_t canRxMsgQueueHandle;
@@ -166,9 +166,9 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
-//	osThreadSuspend(canRouterTaskHandle);
-//	osThreadSuspend(canServerTaskHandle);
-//	osThreadSuspend(canClientTaskHandle);
+	osThreadSuspend(canRouterTaskHandle);
+	osThreadSuspend(canServerTaskHandle);
+	osThreadSuspend(canClientTaskHandle);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -189,8 +189,7 @@ void StartDefaultTask(void *argument)
   /* init code for USB_HOST */
   MX_USB_HOST_Init();
   /* USER CODE BEGIN StartDefaultTask */
-	/* Init CSP */
-	csp_init();
+
   /* Infinite loop */
   for(;;)
   {

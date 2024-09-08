@@ -97,6 +97,9 @@ int csp_can_set_rx_filter(csp_iface_t *iface, uint16_t filter_addr,
  *  @return #CSP_ERR_NONE on success, otherwise an error code.
  */
 int csp_can_stop(csp_iface_t *iface);
+
+int csp_can_tx_frame(void *driver_data, uint32_t id, const uint8_t *data,
+		uint8_t dlc);
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus
