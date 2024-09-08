@@ -550,6 +550,9 @@ void canStartServerTask(void *argument)
 						(char*) packet->data);
 				csp_buffer_free(packet);
 				++server_received;
+
+				/* TODO:  ACK*/
+
 				break;
 
 			default:
@@ -570,7 +573,7 @@ void canStartClientTask(void *argument)
 	currentMode = &((evState_t*) argument)->comm;
 	printf("Client task started\n");
 
-	unsigned int count = 'A';
+	uint16_t count = 0;
 	uint16_t server_addr = 10;
 
 	for (;;)
@@ -610,9 +613,19 @@ void canStartClientTask(void *argument)
 		}
 
 		/* 3. Copy data to packet */
-		memcpy(packet->data, "Hello world ", 12);
-		memcpy(packet->data + 12, &count, 1);
-		memset(packet->data + 13, 0, 1);
+		csp_print("0x%03X [%d] ", 0x300 & 0xfff, 8);
+		unsigned int alen = sprintf((char*) packet->data, "%03X#",
+				0x300 & 0xfff);
+
+		csend[0] = ((uint8_t) (count >> 8)) & 0xFF;
+		csend[1] = ((uint8_t) (count >> 0)) & 0xFF;
+		for (int i = 0; i < 8; i++)
+		{
+			csp_print("%02X ", csend[i]);
+			alen += sprintf((char*) packet->data + alen, "%02X", csend[i]);
+		}
+		csp_print("\n");
+		memset(packet->data + alen, 0, 1);
 		count++;
 
 		/* 4. Set packet length */

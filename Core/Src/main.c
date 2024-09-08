@@ -105,7 +105,7 @@ int main(void)
   MX_CAN1_Init();
 //  MX_CRC_Init();
 //  MX_RNG_Init();
-//  MX_RTC_Init();
+	MX_RTC_Init();
 //  MX_FATFS_Init();
   MX_USART2_UART_Init();
   /* Call PreOsInit function */
