@@ -41,11 +41,17 @@ static uint8_t server_address = 11;
 /* test mode, used for verifying that host & client can exchange packets over the loopback interface */
 static bool test_mode = false;
 static unsigned int server_received = 0;
-
+extern osThreadId_t canDefaultTaskHandle;
+extern osThreadAttr_t defaultTask_attributes;
 extern osThreadId_t canRouterTaskHandle;
+extern osThreadAttr_t canRouterTask_attributes;
 extern osThreadId_t canServerTaskHandle;
+extern osThreadAttr_t canServerTask_attributes;
 extern osThreadId_t canClientTaskHandle;
+extern osThreadAttr_t canClientTask_attributes;
+
 //Extend CSP_DBG_ERR
+
 #define CSP_DBG_ERR_INVALID_CAN_CONFIG 13
 #define CONFIG_CSP_CAN_RX_MSGQ_DEPTH 10
 
@@ -115,7 +121,7 @@ void MX_CAN1_Init(void)
 	canfil.FilterIdLow = 0xFFFFFFFF;
 	canfil.FilterMaskIdHigh = 0x00000000;
 	canfil.FilterMaskIdLow = 0x00000000;
-	canfil.FilterScale = CAN_FILTERSCALE_32BIT;
+	canfil.FilterScale = CAN_FILTERSCALE_16BIT;
 	canfil.FilterActivation = ENABLE;
 	canfil.SlaveStartFilterBank = 14;
 	HAL_CAN_ConfigFilter(&hcan1, &canfil);
@@ -266,11 +272,13 @@ void canStartDefaultTask(void *argument)
 	csp_init();
 
 //	router_start();
-	osThreadResume(canRouterTaskHandle);
+//	osThreadResume(canRouterTaskHandle);
+	canRouterTaskHandle = osThreadNew(canStartRouterTask, argument,
+			&canRouterTask_attributes);
 
 	csp_iface_t *default_iface = NULL;
 	const char *ifname = "CAN";
-	address = 10;
+	address = 11;
 	server_address = 11;
 	const CAN_HandleTypeDef *device = &hcan1;
 	uint32_t bitrate = 125000;
@@ -339,7 +347,10 @@ void canStartDefaultTask(void *argument)
 //			(default_iface == NULL))
 //			{ /* no interfaces specified -> run server & client via loopback */
 //				server_start();
-			osThreadResume(canServerTaskHandle);
+//			osThreadResume(canServerTaskHandle);
+			canServerTaskHandle = osThreadNew(canStartServerTask,
+					argument,
+					&canServerTask_attributes);
 //			}
 
 			/* Start client thread */
@@ -347,7 +358,9 @@ void canStartDefaultTask(void *argument)
 //			(default_iface == NULL))
 //			{ /* no interfaces specified -> run server & client via loopback */
 //				client_start();
-			osThreadResume(canClientTaskHandle);
+//			osThreadResume(canClientTaskHandle);
+			canClientTaskHandle = osThreadNew(canStartClientTask, argument,
+					&canClientTask_attributes);
 //			}
 
 			*currentMode = IDLE;
@@ -367,6 +380,11 @@ void canStartDefaultTask(void *argument)
 				*currentMode = FAILSAFE;
 				break;
 			}
+			else
+			{
+				osThreadSuspend(canDefaultTaskHandle);
+			}
+			
 //			*currentMode = SETTING;
 			break;
 		case SETTING:
@@ -446,7 +464,7 @@ void canStartDefaultTask(void *argument)
 			*currentMode = *currentMode;
 			break;
 		}
-		osDelay(1);
+
 	}
 }
 
@@ -493,7 +511,7 @@ void canStartServerTask(void *argument)
 	printf("Server task started\n");
 	csp_socket_t sock =
 	{ 0 };
-
+	int dp = 0;
 	/* Bind socket to all ports, e.g. all incoming connections will be handled here */
 	csp_bind(&sock, CSP_ANY);
 
@@ -514,16 +532,27 @@ void canStartServerTask(void *argument)
 		csp_packet_t *packet;
 		while ((packet = csp_read(conn, 50)) != NULL)
 		{
-			switch (csp_conn_dport(conn))
+			dp = csp_conn_dport(conn);
+			switch (dp)
 			{
 			case MY_SERVER_PORT:
 				/* Process packet here */
-				printf("Packet received on MY_SERVER_PORT: %s\n",
+				printf("TC Packet received on PORT %d: %s\n", dp,
 						(char*) packet->data);
+
+				/* TODO:  ACK*/
+				csp_packet_t *ack_packet = csp_buffer_get(0);
+				memcpy(ack_packet->data, packet->data, packet->length);
+
 				csp_buffer_free(packet);
 				++server_received;
 
-				/* TODO:  ACK*/
+				memset(ack_packet->data + 2, '1', 1);
+				printf("ACK Packet send on PORT %d: %s\n", dp,
+						(char*) ack_packet->data);
+
+				csp_send(conn, ack_packet);
+				csp_buffer_free(ack_packet);
 
 				break;
 
@@ -546,7 +575,7 @@ void canStartClientTask(void *argument)
 	printf("Client task started\n");
 
 	uint16_t count = 0;
-	uint16_t server_addr = 11;
+	uint16_t server_addr = 10;
 
 	for (;;)
 	{
@@ -585,7 +614,7 @@ void canStartClientTask(void *argument)
 		}
 
 		/* 3. Copy data to packet */
-		csp_print("0x%03X [%d] ", 0x300 & 0xfff, 8);
+		csp_print("Send status: 0x%03X [%d] ", 0x300 & 0xfff, 8);
 		unsigned int alen = sprintf((char*) packet->data, "%03X#",
 				0x300 & 0xfff);
 
@@ -783,22 +812,30 @@ int csp_can_set_rx_filter(csp_iface_t *iface, uint16_t filter_addr,
 
 	if (csp_conf.version == 1)
 	{
-//		filter.id = CFP_MAKE_DST(filter_addr);
-//		filter.mask = CFP_MAKE_DST(filter_mask);
+//		filter->FilterIdHigh = CFP_MAKE_DST(filter_addr);
+//		filter->FilterMaskIdHigh = CFP_MAKE_DST(filter_mask);
+
+		filter->FilterIdLow = CFP_MAKE_DST(filter_addr);
+		filter->FilterMaskIdLow = CFP_MAKE_DST(filter_mask);
 	}
 	else
 	{
-//		filter.id = filter_addr << CFP2_DST_OFFSET;
-//		filter.mask = filter_mask << CFP2_DST_OFFSET;
+//		filter->FilterIdHigh = filter_addr << CFP2_DST_OFFSET;
+//		filter->FilterMaskIdHigh = filter_mask << CFP2_DST_OFFSET;
+
+		filter->FilterIdLow = filter_addr << CFP2_DST_OFFSET;
+		filter->FilterMaskIdLow = filter_mask << CFP2_DST_OFFSET;
 	}
 
 //	ret = can_add_rx_filter_msgq(ctx->device, &ctx->rx_msgq, &filter);
-//	if (ret < 0)
-//	{
-//		LOG_ERR("[%s] can_add_rx_filter_msgq() failed, error: %d", iface->name,
-//				ctx->filter_id);
-//		goto end;
-//	}
+	ret = HAL_CAN_ConfigFilter(ctx->device, filter);
+	if (ret < 0)
+	{
+		printf("[%s] can_add_rx_filter_msgq() failed, error: %d\n", iface->name,
+				ctx->filter_id);
+		goto end;
+	}
+
 	ctx->filter_id = ret;
 
 	end: return ret;

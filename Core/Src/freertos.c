@@ -150,25 +150,26 @@ void MX_FREERTOS_Init(void) {
 
   /* Create the thread(s) */
   /* creation of defaultTask */
-  defaultTaskHandle = osThreadNew(StartDefaultTask, (void*) &ev, &defaultTask_attributes);
+//  defaultTaskHandle = osThreadNew(StartDefaultTask, (void*) &ev, &defaultTask_attributes);
 
   /* creation of canDefaultTask */
   canDefaultTaskHandle = osThreadNew(canStartDefaultTask, (void*) &ev, &canDefaultTask_attributes);
 
   /* creation of canRouterTask */
-  canRouterTaskHandle = osThreadNew(canStartRouterTask, (void*) &ev, &canRouterTask_attributes);
+//	canRouterTaskHandle = osThreadNew(canStartRouterTask, (void*) &ev,
+//			&canRouterTask_attributes);
 
   /* creation of canServerTask */
-  canServerTaskHandle = osThreadNew(canStartServerTask, (void*) &ev, &canServerTask_attributes);
+//  canServerTaskHandle = osThreadNew(canStartServerTask, (void*) &ev, &canServerTask_attributes);
 
   /* creation of canClientTask */
-  canClientTaskHandle = osThreadNew(canStartClientTask, (void*) &ev, &canClientTask_attributes);
+//  canClientTaskHandle = osThreadNew(canStartClientTask, (void*) &ev, &canClientTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
-	osThreadSuspend(canRouterTaskHandle);
-	osThreadSuspend(canServerTaskHandle);
-	osThreadSuspend(canClientTaskHandle);
+//	osThreadSuspend(canRouterTaskHandle);
+//	osThreadSuspend(canServerTaskHandle);
+//	osThreadSuspend(canClientTaskHandle);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -218,7 +219,7 @@ void StartDefaultTask(void *argument)
 		// 				break;
 		//		}
 
-    osDelay(1);
+//    osDelay(1);
   }
   /* USER CODE END StartDefaultTask */
 }
