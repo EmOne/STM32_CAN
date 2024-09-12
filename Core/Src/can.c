@@ -80,7 +80,7 @@ typedef struct
 can_context_t mcan[1] =
 {
 		{ .mode = 0, .lock = NULL, .interface =
-		{ .name = "CAN", .interface_data = &mcan[0].ifdata, .driver_data =
+		{ .name = "can0", .interface_data = &mcan[0].ifdata, .driver_data =
 				&mcan[0], }, } };
 /* USER CODE END 0 */
 
@@ -114,28 +114,7 @@ void MX_CAN1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN CAN1_Init 2 */
-	canfil.FilterBank = 0;
-	canfil.FilterMode = CAN_FILTERMODE_IDMASK;
-	canfil.FilterFIFOAssignment = CAN_RX_FIFO0;
-	canfil.FilterIdHigh = 0xFFFFFFFF;
-	canfil.FilterIdLow = 0xFFFFFFFF;
-	canfil.FilterMaskIdHigh = 0x00000000;
-	canfil.FilterMaskIdLow = 0x00000000;
-	canfil.FilterScale = CAN_FILTERSCALE_16BIT;
-	canfil.FilterActivation = ENABLE;
-	canfil.SlaveStartFilterBank = 14;
-	HAL_CAN_ConfigFilter(&hcan1, &canfil);
 
-	txHeader.DLC = 8;
-	txHeader.IDE = CAN_ID_STD;
-	txHeader.RTR = CAN_RTR_DATA;
-	txHeader.StdId = 0x300;
-	txHeader.ExtId = 0x100;
-	txHeader.TransmitGlobalTime = ENABLE;
-	HAL_CAN_Start(&hcan1);
-
-	HAL_CAN_ActivateNotification(&hcan1,
-	CAN_IT_RX_FIFO0_MSG_PENDING);
   /* USER CODE END CAN1_Init 2 */
 
 }
@@ -277,14 +256,14 @@ void canStartDefaultTask(void *argument)
 			&canRouterTask_attributes);
 
 	csp_iface_t *default_iface = NULL;
-	const char *ifname = "CAN";
+	const char *ifname = "can0";
 	address = 11;
 	server_address = 11;
 	const CAN_HandleTypeDef *device = &hcan1;
 	uint32_t bitrate = 125000;
 
 	uint16_t filter_addr = address;
-	uint16_t filter_mask = 0x3FFF;
+	uint16_t filter_mask = 0; //0x3FFF;
 
 	for (;;)
 	{
@@ -544,15 +523,15 @@ void canStartServerTask(void *argument)
 				csp_packet_t *ack_packet = csp_buffer_get(0);
 				memcpy(ack_packet->data, packet->data, packet->length);
 
-				csp_buffer_free(packet);
-				++server_received;
-
 				memset(ack_packet->data + 2, '1', 1);
 				printf("ACK Packet send on PORT %d: %s\n", dp,
 						(char*) ack_packet->data);
 
-				csp_send(conn, ack_packet);
+				csp_sendto_reply(packet, ack_packet, CSP_O_SAME);
+
 				csp_buffer_free(ack_packet);
+				csp_buffer_free(packet);
+				++server_received;
 
 				break;
 
@@ -581,16 +560,17 @@ void canStartClientTask(void *argument)
 	{
 		//		k_sleep(test_mode ? K_USEC(200000) : K_USEC(1000000));
 		osDelay(test_mode ? 200 : 1000);
-
-		/* Send ping to server, timeout 1000 mS, ping size 100 bytes */
-		int result = csp_ping(server_addr, 1000, 100, CSP_O_NONE);
+		HAL_GPIO_TogglePin(LD4_GPIO_Port, LD4_Pin);
+		/* Send ping to server, timeout 1000 mS, ping size 10 bytes */
+		int result = csp_ping(server_addr, 1000, 10, CSP_O_NONE);
 		printf("Ping address: %u, result %d [mS]\n", server_addr, result);
 
 		if (result == -1)
 		{
 			/* Send reboot request to server, the server has no actual implementation of csp_sys_reboot() and fails to reboot */
-			csp_reboot(server_addr);
-			printf("reboot system request sent to address: %u\n", server_addr);
+//			csp_reboot(server_addr);
+//			printf("reboot system request sent to address: %u\n", server_addr);
+			continue;
 		}
 		/* Send data packet (string) to server */
 
@@ -637,8 +617,6 @@ void canStartClientTask(void *argument)
 
 		/* 6. Close connection */
 		csp_close(conn);
-
-		HAL_GPIO_TogglePin(LD4_GPIO_Port, LD4_Pin);
 	}
 }
 
@@ -649,7 +627,11 @@ int csp_can_open_and_add_interface(const CAN_HandleTypeDef *device,
 		const char *ifname, uint16_t address, uint32_t bitrate,
 		uint16_t filter_addr, uint16_t filter_mask, csp_iface_t **return_iface)
 {
+	/* Create a mutex type semaphore. */
+	mcan[0].lock = xSemaphoreCreateMutexStatic(&mcan[0].lock_buf);
+
 	int ret;
+	unsigned int netmask = filter_mask;
 //	osThreadId_t rx_tid;
 	can_context_t *ctx = &mcan[0];
 	const char *name = ifname ? ifname : mcan[0].name;
@@ -658,6 +640,27 @@ int csp_can_open_and_add_interface(const CAN_HandleTypeDef *device,
 	{
 		ret = CSP_ERR_INVAL;
 		goto end;
+	}
+
+	const csp_conf_t *csp_conf = csp_get_conf();
+	if (csp_conf->version == 2)
+	{
+
+		canfil.FilterMaskIdLow = CFP2_DST_MASK << CFP2_DST_OFFSET;
+
+		mcan[0].id = address << CFP2_DST_OFFSET;
+		mcan[0].id_l3bc = ((1 << (csp_id_get_host_bits() - netmask)) - 1)
+				<< CFP2_DST_OFFSET;
+		mcan[0].id_l2bc = 0x3FFF << CFP2_DST_OFFSET;
+	}
+	else
+	{
+
+		canfil.FilterMaskIdLow = CFP_MAKE_DST((1 << CFP_HOST_SIZE) - 1);
+
+		mcan[0].id = CFP_MAKE_DST(address);
+		mcan[0].id_l2bc = 0; //! Not supported on CSP1
+		mcan[0].id_l3bc = 0; //! Not supported on CSP1
 	}
 
 //	if (rx_thread_idx >= CONFIG_CSP_CAN_RX_THREAD_NUM)
@@ -692,6 +695,7 @@ int csp_can_open_and_add_interface(const CAN_HandleTypeDef *device,
 	strncpy(ctx->name, name, sizeof(ctx->name) - 1);
 	ctx->interface.name = ctx->name;
 	ctx->interface.addr = address;
+	ctx->interface.netmask = netmask;
 	ctx->interface.interface_data = &ctx->ifdata;
 	ctx->interface.driver_data = ctx;
 	ctx->ifdata.tx_func = csp_can_tx_frame;
@@ -718,6 +722,7 @@ int csp_can_open_and_add_interface(const CAN_HandleTypeDef *device,
 //		LOG_ERR("[%s] can_set_bitrate() failed, error: %d", ctx->name, ret);
 //		goto cleanup_heap;
 //	}
+	MX_CAN1_Init();
 
 	/* Set RX filter */
 	ret = csp_can_set_rx_filter(&ctx->interface, filter_addr, filter_mask);
@@ -753,12 +758,14 @@ int csp_can_open_and_add_interface(const CAN_HandleTypeDef *device,
 //	rx_thread_idx++;
 
 	/* Enable CAN */
-//	ret = HAL_CAN_Start((CAN_HandleTypeDef*) device);
-//	if (ret < 0)
-//	{
-//		printf("[%s] can_start() failed, error: %d", ctx->name, ret);
-//		return ret; //goto cleanup_thread;
-//	}
+	ret = HAL_CAN_Start((CAN_HandleTypeDef*) device);
+	if (ret < 0)
+	{
+		printf("[%s] can_start() failed, error: %d", ctx->name, ret);
+		return ret; //goto cleanup_thread;
+	}
+	HAL_CAN_ActivateNotification(&hcan1,
+	CAN_IT_RX_FIFO0_MSG_PENDING);
 
 	if (return_iface)
 	{
@@ -827,6 +834,13 @@ int csp_can_set_rx_filter(csp_iface_t *iface, uint16_t filter_addr,
 		filter->FilterMaskIdLow = filter_mask << CFP2_DST_OFFSET;
 	}
 
+	filter->FilterBank = 0;
+	filter->FilterMode = CAN_FILTERMODE_IDMASK;
+	filter->FilterFIFOAssignment = CAN_RX_FIFO0;
+	filter->FilterScale = CAN_FILTERSCALE_32BIT;
+	filter->FilterActivation = ENABLE;
+	filter->SlaveStartFilterBank = 14;
+
 //	ret = can_add_rx_filter_msgq(ctx->device, &ctx->rx_msgq, &filter);
 	ret = HAL_CAN_ConfigFilter(ctx->device, filter);
 	if (ret < 0)
@@ -887,11 +901,11 @@ int csp_can_tx_frame(void *driver_data, uint32_t id, const uint8_t *data,
 //	struct can_frame frame =
 //	{ 0 };
 	can_context_t *ctx = driver_data;
-//	if (dlc > 8) //CAN_MAX_DLC)
-//	{
-//		ret = CSP_ERR_INVAL;
-//		goto end;
-//	}
+	if (dlc > 8) //CAN_MAX_DLC)
+	{
+		ret = CSP_ERR_INVAL;
+		goto end;
+	}
 
 //	frame.id = id;
 //	frame.dlc = dlc;
@@ -901,6 +915,7 @@ int csp_can_tx_frame(void *driver_data, uint32_t id, const uint8_t *data,
 	txHeader.RTR = 0;
 	txHeader.DLC = dlc;
 	txHeader.IDE = CAN_ID_EXT;
+	txHeader.TransmitGlobalTime = ENABLE;
 	memcpy(buf, data, dlc);
 
 //	ret = can_send(ctx->device, &frame, CSP_CAN_TX_TIME_OUT, NULL, NULL);
@@ -910,7 +925,7 @@ int csp_can_tx_frame(void *driver_data, uint32_t id, const uint8_t *data,
 		printf("[%s] can_send() failed, errno %d", ctx->name, ret);
 	}
 	HAL_GPIO_TogglePin(LD5_GPIO_Port, LD5_Pin);
-//	end:
+	end:
 	return ret;
 }
 /* USER CODE END 1 */
