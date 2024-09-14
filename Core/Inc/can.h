@@ -102,6 +102,9 @@ int csp_can_stop(csp_iface_t *iface);
 
 int csp_can_tx_frame(void *driver_data, uint32_t id, const uint8_t *data,
 		uint8_t dlc);
+
+int csp_aiim_ack(csp_packet_t *packet, uint16_t node, uint32_t timeout,
+		uint8_t conn_options);
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus

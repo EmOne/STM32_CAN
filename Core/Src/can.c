@@ -34,6 +34,9 @@ Mode *currentMode;
 
 /* Server port, the port the server listens on for incoming connections from the client. */
 #define MY_SERVER_PORT		10
+#define SERVER_ACK_PORT		14
+#define SERVER_STATUS_PORT	15
+#define SERVER_TC_PORT		16
 
 /* Commandline options */
 static uint8_t server_address = 11;
@@ -527,6 +530,7 @@ void canStartServerTask(void *argument)
 			dp = csp_conn_dport(conn);
 			switch (dp)
 			{
+			case SERVER_TC_PORT:
 			case MY_SERVER_PORT:
 				/* Process packet here */
 				csp_print("TC Packet received on PORT %d: %s (%ld)\n", dp,
@@ -541,9 +545,10 @@ void canStartServerTask(void *argument)
 				memset(ack_packet->data + ack_packet->length, 0, 1);
 				ack_packet->length++;
 
-				csp_sendto_reply(packet, ack_packet, CSP_O_SAME);
+				csp_aiim_ack(ack_packet, server_address, 1000, CSP_O_NONE);
 
-				csp_print("ACK Packet send on PORT %d: %s (%ld)\n", dp,
+				csp_print("ACK Packet send on PORT %d: %s (%ld)\n",
+						SERVER_ACK_PORT,
 						(char*) ack_packet->data, ack_packet->length);
 
 				csp_buffer_free(ack_packet);
@@ -571,6 +576,7 @@ void canStartClientTask(void *argument)
 
 	uint16_t count = 0;
 	uint16_t server_addr = 10;
+	uint16_t csp_aiim_status_port = 16;
 
 	csp_print("Client task started\n");
 
@@ -592,7 +598,7 @@ void canStartClientTask(void *argument)
 		}
 		else
 		{
-			osDelay(100);
+			osDelay(1000);
 		}
 		/* Send data packet (string) to server */
 
@@ -628,7 +634,7 @@ void canStartClientTask(void *argument)
 
 		/* 4. Connect to host on 'server_address', port MY_SERVER_PORT with regular UDP-like protocol and 1000 ms timeout */
 		csp_conn_t *conn = csp_connect(CSP_PRIO_NORM, server_addr,
-		MY_SERVER_PORT, 1000, CSP_O_NONE);
+				csp_aiim_status_port, 1000, CSP_O_NONE);
 		if (conn == NULL)
 		{
 			/* Connect failed */
@@ -953,5 +959,33 @@ int csp_can_tx_frame(void *driver_data, uint32_t id, const uint8_t *data,
 	HAL_GPIO_TogglePin(LD5_GPIO_Port, LD5_Pin);
 	end:
 	return ret;
+}
+
+int csp_aiim_ack(csp_packet_t *packet, uint16_t node, uint32_t timeout,
+		uint8_t conn_options)
+{
+	unsigned int i;
+	uint32_t start, time, status = 0;
+
+	/* Counter */
+	start = csp_get_ms();
+
+	/* Open connection */
+	csp_conn_t *conn = csp_connect(CSP_PRIO_NORM, node, SERVER_ACK_PORT,
+			timeout,
+			conn_options);
+	if (conn == NULL)
+		return -1;
+
+	/* Try to send frame */
+	csp_send(conn, packet);
+
+	/* Clean up */
+	csp_close(conn);
+
+	/* We have a reply */
+	time = (csp_get_ms() - start);
+
+	return time;
 }
 /* USER CODE END 1 */
