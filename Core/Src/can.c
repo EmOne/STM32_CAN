@@ -529,18 +529,22 @@ void canStartServerTask(void *argument)
 			{
 			case MY_SERVER_PORT:
 				/* Process packet here */
-				csp_print("TC Packet received on PORT %d: %s\n", dp,
-						(char*) packet->data);
+				csp_print("TC Packet received on PORT %d: %s (%ld)\n", dp,
+						(char*) packet->data, packet->length);
 
 				/* TODO:  ACK*/
 				csp_packet_t *ack_packet = csp_buffer_get(0);
-				memcpy(ack_packet->data, packet->data, packet->length);
+				ack_packet->length = sprintf((char*) ack_packet->data, "%s",
+						packet->data);
 
 				memset(ack_packet->data + 2, '1', 1);
-				csp_print("ACK Packet send on PORT %d: %s\n", dp,
-						(char*) ack_packet->data);
+				memset(ack_packet->data + ack_packet->length, 0, 1);
+				ack_packet->length++;
 
 				csp_sendto_reply(packet, ack_packet, CSP_O_SAME);
+
+				csp_print("ACK Packet send on PORT %d: %s (%ld)\n", dp,
+						(char*) ack_packet->data, ack_packet->length);
 
 				csp_buffer_free(ack_packet);
 				csp_buffer_free(packet);
@@ -616,6 +620,7 @@ void canStartClientTask(void *argument)
 		}
 		csp_print("\n");
 		memset(packet->data + alen, 0, 1);
+		alen += 1;
 		count++;
 
 		/* 3. Set packet length */
