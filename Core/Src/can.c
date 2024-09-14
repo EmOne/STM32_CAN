@@ -533,7 +533,7 @@ void canStartServerTask(void *argument)
 			case SERVER_TC_PORT:
 			case MY_SERVER_PORT:
 				/* Process packet here */
-				csp_print("TC Packet received on PORT %d: %s (%ld)\n", dp,
+				csp_print("TC Packet received on PORT (%d): %s (%ld)\n", dp,
 						(char*) packet->data, packet->length);
 
 				/* TODO:  ACK*/
@@ -545,9 +545,9 @@ void canStartServerTask(void *argument)
 				memset(ack_packet->data + ack_packet->length, 0, 1);
 				ack_packet->length++;
 
-				csp_aiim_ack(ack_packet, server_address, 1000, CSP_O_NONE);
+				csp_can_send_ack(ack_packet, server_address, 1000, CSP_O_NONE);
 
-				csp_print("ACK Packet send on PORT %d: %s (%ld)\n",
+				csp_print("ACK Packet send on PORT (%d): %s (%ld)\n",
 						SERVER_ACK_PORT,
 						(char*) ack_packet->data, ack_packet->length);
 
@@ -576,7 +576,6 @@ void canStartClientTask(void *argument)
 
 	uint16_t count = 0;
 	uint16_t server_addr = 10;
-	uint16_t csp_aiim_status_port = 16;
 
 	csp_print("Client task started\n");
 
@@ -612,7 +611,8 @@ void canStartClientTask(void *argument)
 		}
 
 		/* 2. Copy data to packet */
-		csp_print("Send status: 0x%03X [%d] ", 0x300 & 0xfff, 8);
+		csp_print("Send status on Port (%d): 0x%03X [%d] ", SERVER_STATUS_PORT,
+				0x300 & 0xfff, 8);
 		unsigned int alen = sprintf((char*) packet->data, "%03X#",
 				0x300 & 0xfff);
 
@@ -624,9 +624,10 @@ void canStartClientTask(void *argument)
 			alen += sprintf((char*) packet->data + alen, "%02X", csend[i])
 			;
 		}
-		csp_print("\n");
+
 		memset(packet->data + alen, 0, 1);
 		alen += 1;
+		csp_print("(%d)\n", alen);
 		count++;
 
 		/* 3. Set packet length */
@@ -634,7 +635,7 @@ void canStartClientTask(void *argument)
 
 		/* 4. Connect to host on 'server_address', port MY_SERVER_PORT with regular UDP-like protocol and 1000 ms timeout */
 		csp_conn_t *conn = csp_connect(CSP_PRIO_NORM, server_addr,
-				csp_aiim_status_port, 1000, CSP_O_NONE);
+		SERVER_STATUS_PORT, 1000, CSP_O_NONE);
 		if (conn == NULL)
 		{
 			/* Connect failed */
@@ -961,7 +962,7 @@ int csp_can_tx_frame(void *driver_data, uint32_t id, const uint8_t *data,
 	return ret;
 }
 
-int csp_aiim_ack(csp_packet_t *packet, uint16_t node, uint32_t timeout,
+int csp_can_send_ack(csp_packet_t *packet, uint16_t node, uint32_t timeout,
 		uint8_t conn_options)
 {
 	unsigned int i;
