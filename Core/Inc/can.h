@@ -41,6 +41,7 @@ extern "C" {
 #include <stdbool.h>
 
 //CubeSat Space Protocol
+#include "csp/csp_debug.h"
 #include "csp/csp.h"
 #include "csp/csp_id.h"
 #include "csp/interfaces/csp_if_can.h"

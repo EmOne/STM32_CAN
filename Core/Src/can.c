@@ -98,10 +98,10 @@ void MX_CAN1_Init(void)
 
   /* USER CODE END CAN1_Init 1 */
   hcan1.Instance = CAN1;
-  hcan1.Init.Prescaler = 42;
+  hcan1.Init.Prescaler = 6;
   hcan1.Init.Mode = CAN_MODE_NORMAL;
   hcan1.Init.SyncJumpWidth = CAN_SJW_2TQ;
-  hcan1.Init.TimeSeg1 = CAN_BS1_4TQ;
+  hcan1.Init.TimeSeg1 = CAN_BS1_3TQ;
   hcan1.Init.TimeSeg2 = CAN_BS2_3TQ;
   hcan1.Init.TimeTriggeredMode = DISABLE;
   hcan1.Init.AutoBusOff = ENABLE;
@@ -244,26 +244,31 @@ void canStartDefaultTask(void *argument)
 	const char *rtable = NULL;
 	csp_iface_t *can_iface = NULL;
 
-	printf("Initializing CSP\n");
+	osThreadSuspend(canRouterTaskHandle);
+	osThreadSuspend(canServerTaskHandle);
+	osThreadSuspend(canClientTaskHandle);
+
+	csp_print("Initializing CSP\n");
 
 	/* Start router */
+	csp_dbg_packet_print = 1;
 	/* Init CSP */
 	csp_init();
 
 //	router_start();
-//	osThreadResume(canRouterTaskHandle);
-	canRouterTaskHandle = osThreadNew(canStartRouterTask, argument,
-			&canRouterTask_attributes);
+	osThreadResume(canRouterTaskHandle);
+//	canRouterTaskHandle = osThreadNew(canStartRouterTask, argument,
+//			&canRouterTask_attributes);
 
 	csp_iface_t *default_iface = NULL;
 	const char *ifname = "can0";
 	address = 11;
-	server_address = 11;
+	server_address = 10;
 	const CAN_HandleTypeDef *device = &hcan1;
-	uint32_t bitrate = 125000;
+	uint32_t bitrate = 1000000;
 
 	uint16_t filter_addr = address;
-	uint16_t filter_mask = 0; //0x3FFF;
+	uint16_t filter_mask = 0; //x3FFF;
 
 	for (;;)
 	{
@@ -276,7 +281,8 @@ void canStartDefaultTask(void *argument)
 					bitrate, filter_addr, filter_mask, &can_iface);
 			if (error != CSP_ERR_NONE)
 			{
-				printf("failed to add CAN interface [%s], error: %d\n", ifname,
+				csp_print("failed to add CAN interface [%s], error: %d\n",
+						ifname,
 						error);
 				*currentMode = FAILSAFE;
 				break;
@@ -289,7 +295,7 @@ void canStartDefaultTask(void *argument)
 				int error = csp_rtable_load(rtable);
 				if (error < 1)
 				{
-					printf("csp_rtable_load(%s) failed, error: %d", rtable,
+					csp_print("csp_rtable_load(%s) failed, error: %d", rtable,
 							error);
 					*currentMode = FAILSAFE;
 					break;
@@ -312,13 +318,16 @@ void canStartDefaultTask(void *argument)
 			 * In the Zephyr port, we have disabled stdio usage and unified logging with the Zephyr
 			 * logging API. As a result, the following functions currently do not print anything.
 			 */
-			printf("Connection table\n");
+			csp_print("Connection table\n")
+			;
 			csp_conn_print_table();
 
-			printf("Interfaces\n");
+			csp_print("Interfaces\n")
+			;
 			csp_iflist_print();
 
-			printf("Route table\n");
+			csp_print("Route table\n")
+			;
 			csp_rtable_print();
 
 			/* Start server thread */
@@ -326,10 +335,10 @@ void canStartDefaultTask(void *argument)
 //			(default_iface == NULL))
 //			{ /* no interfaces specified -> run server & client via loopback */
 //				server_start();
-//			osThreadResume(canServerTaskHandle);
-			canServerTaskHandle = osThreadNew(canStartServerTask,
-					argument,
-					&canServerTask_attributes);
+			osThreadResume(canServerTaskHandle);
+//			canServerTaskHandle = osThreadNew(canStartServerTask,
+//					argument,
+//					&canServerTask_attributes);
 //			}
 
 			/* Start client thread */
@@ -338,8 +347,8 @@ void canStartDefaultTask(void *argument)
 //			{ /* no interfaces specified -> run server & client via loopback */
 //				client_start();
 //			osThreadResume(canClientTaskHandle);
-			canClientTaskHandle = osThreadNew(canStartClientTask, argument,
-					&canClientTask_attributes);
+//			canClientTaskHandle = osThreadNew(canStartClientTask, argument,
+//					&canClientTask_attributes);
 //			}
 
 			*currentMode = IDLE;
@@ -351,11 +360,11 @@ void canStartDefaultTask(void *argument)
 				/* Test mode is intended for checking that host & client can exchange packets over loopback */
 				if (server_received < 5)
 				{
-					printf("Server received %u packets", server_received);
+					csp_print("Server received %u packets", server_received);
 					*currentMode = FAILSAFE;
 					break;
 				}
-				printf("Server received %u packets", server_received);
+				csp_print("Server received %u packets", server_received);
 				*currentMode = FAILSAFE;
 				break;
 			}
@@ -450,6 +459,7 @@ void canStartDefaultTask(void *argument)
 void canStartRouterTask(void *argument)
 {
 	currentMode = &((evState_t*) argument)->comm;
+
 	for (;;)
 	{
 //		//Event cur_event = event_check();
@@ -487,16 +497,19 @@ void canStartServerTask(void *argument)
 {
 	currentMode = &((evState_t*) argument)->comm;
 
-	printf("Server task started\n");
 	csp_socket_t sock =
 	{ 0 };
 	int dp = 0;
+
+	csp_print("Server task started\n");
+
 	/* Bind socket to all ports, e.g. all incoming connections will be handled here */
 	csp_bind(&sock, CSP_ANY);
 
 	/* Create a backlog of 10 connections, i.e. up to 10 new connections can be queued */
 	csp_listen(&sock, 10);
 
+	osThreadResume(canClientTaskHandle);
 	for (;;)
 	{
 //		/* Wait for a new connection, 10000 mS timeout */
@@ -516,7 +529,7 @@ void canStartServerTask(void *argument)
 			{
 			case MY_SERVER_PORT:
 				/* Process packet here */
-				printf("TC Packet received on PORT %d: %s\n", dp,
+				csp_print("TC Packet received on PORT %d: %s\n", dp,
 						(char*) packet->data);
 
 				/* TODO:  ACK*/
@@ -524,7 +537,7 @@ void canStartServerTask(void *argument)
 				memcpy(ack_packet->data, packet->data, packet->length);
 
 				memset(ack_packet->data + 2, '1', 1);
-				printf("ACK Packet send on PORT %d: %s\n", dp,
+				csp_print("ACK Packet send on PORT %d: %s\n", dp,
 						(char*) ack_packet->data);
 
 				csp_sendto_reply(packet, ack_packet, CSP_O_SAME);
@@ -551,10 +564,11 @@ void canStartServerTask(void *argument)
 void canStartClientTask(void *argument)
 {
 	currentMode = &((evState_t*) argument)->comm;
-	printf("Client task started\n");
 
 	uint16_t count = 0;
 	uint16_t server_addr = 10;
+
+	csp_print("Client task started\n");
 
 	for (;;)
 	{
@@ -563,37 +577,31 @@ void canStartClientTask(void *argument)
 		HAL_GPIO_TogglePin(LD4_GPIO_Port, LD4_Pin);
 		/* Send ping to server, timeout 1000 mS, ping size 10 bytes */
 		int result = csp_ping(server_addr, 1000, 10, CSP_O_NONE);
-		printf("Ping address: %u, result %d [mS]\n", server_addr, result);
+		csp_print("Ping address: %u, result %d [mS]\n", server_addr, result);
 
 		if (result == -1)
 		{
 			/* Send reboot request to server, the server has no actual implementation of csp_sys_reboot() and fails to reboot */
 //			csp_reboot(server_addr);
-//			printf("reboot system request sent to address: %u\n", server_addr);
+//			csp_print("reboot system request sent to address: %u\n", server_addr);
 			continue;
+		}
+		else
+		{
+			osDelay(100);
 		}
 		/* Send data packet (string) to server */
 
-		/* 1. Connect to host on 'server_address', port MY_SERVER_PORT with regular UDP-like protocol and 1000 ms timeout */
-		csp_conn_t *conn = csp_connect(CSP_PRIO_NORM, server_addr,
-		MY_SERVER_PORT, 1000, CSP_O_NONE);
-		if (conn == NULL)
-		{
-			/* Connect failed */
-			printf("Connection failed\n");
-			return;
-		}
-
-		/* 2. Get packet buffer for message/data */
+		/* 1. Get packet buffer for message/data */
 		csp_packet_t *packet = csp_buffer_get(0);
 		if (packet == NULL)
 		{
 			/* Could not get buffer element */
-			printf("Failed to get CSP buffer\n");
+			csp_print("Failed to get CSP buffer\n");
 			return;
 		}
 
-		/* 3. Copy data to packet */
+		/* 2. Copy data to packet */
 		csp_print("Send status: 0x%03X [%d] ", 0x300 & 0xfff, 8);
 		unsigned int alen = sprintf((char*) packet->data, "%03X#",
 				0x300 & 0xfff);
@@ -603,19 +611,31 @@ void canStartClientTask(void *argument)
 		for (int i = 0; i < 8; i++)
 		{
 			csp_print("%02X ", csend[i]);
-			alen += sprintf((char*) packet->data + alen, "%02X", csend[i]);
+			alen += sprintf((char*) packet->data + alen, "%02X", csend[i])
+			;
 		}
 		csp_print("\n");
 		memset(packet->data + alen, 0, 1);
 		count++;
 
-		/* 4. Set packet length */
-		packet->length = (strlen((char*) packet->data) + 1); /* include the 0 termination */
+		/* 3. Set packet length */
+		packet->length = alen; //(strlen((char*) packet->data) + 1); /* include the 0 termination */
+
+		/* 4. Connect to host on 'server_address', port MY_SERVER_PORT with regular UDP-like protocol and 1000 ms timeout */
+		csp_conn_t *conn = csp_connect(CSP_PRIO_NORM, server_addr,
+		MY_SERVER_PORT, 1000, CSP_O_NONE);
+		if (conn == NULL)
+		{
+			/* Connect failed */
+			csp_print("Connection failed\n");
+			return;
+		}
 
 		/* 5. Send packet */
 		csp_send(conn, packet);
 
 		/* 6. Close connection */
+		csp_buffer_free(packet);
 		csp_close(conn);
 	}
 }
@@ -706,7 +726,7 @@ int csp_can_open_and_add_interface(const CAN_HandleTypeDef *device,
 //			)
 //			{ 0 });
 
-	printf(
+	csp_print(
 			"INIT %s: device, local address: %d, bitrate: %ld: filter add: %d, filter mask: 0x%04x\n",
 			ctx->name, address, bitrate, filter_addr,
 			filter_mask);
@@ -728,7 +748,7 @@ int csp_can_open_and_add_interface(const CAN_HandleTypeDef *device,
 	ret = csp_can_set_rx_filter(&ctx->interface, filter_addr, filter_mask);
 	if (ret < 0)
 	{
-		printf("[%s] csp_can_add_rx_filter() failed, error: %d", ctx->name,
+		csp_print("[%s] csp_can_add_rx_filter() failed, error: %d", ctx->name,
 				ret);
 //		goto cleanup_heap;
 		return ret;
@@ -738,7 +758,7 @@ int csp_can_open_and_add_interface(const CAN_HandleTypeDef *device,
 	ret = csp_can_add_interface(&ctx->interface);
 	if (ret != CSP_ERR_NONE)
 	{
-		printf("[%s] csp_can_add_interface() failed, error: %d", ctx->name,
+		csp_print("[%s] csp_can_add_interface() failed, error: %d", ctx->name,
 				ret);
 		return ret; //goto cleanup_filter;
 	}
@@ -761,7 +781,7 @@ int csp_can_open_and_add_interface(const CAN_HandleTypeDef *device,
 	ret = HAL_CAN_Start((CAN_HandleTypeDef*) device);
 	if (ret < 0)
 	{
-		printf("[%s] can_start() failed, error: %d", ctx->name, ret);
+		csp_print("[%s] can_start() failed, error: %d", ctx->name, ret);
 		return ret; //goto cleanup_thread;
 	}
 	HAL_CAN_ActivateNotification(&hcan1,
@@ -845,7 +865,8 @@ int csp_can_set_rx_filter(csp_iface_t *iface, uint16_t filter_addr,
 	ret = HAL_CAN_ConfigFilter(ctx->device, filter);
 	if (ret < 0)
 	{
-		printf("[%s] can_add_rx_filter_msgq() failed, error: %d\n", iface->name,
+		csp_print("[%s] can_add_rx_filter_msgq() failed, error: %d\n",
+				iface->name,
 				ctx->filter_id);
 		goto end;
 	}
@@ -874,7 +895,7 @@ int csp_can_stop(csp_iface_t *iface)
 	ret = HAL_CAN_Stop(ctx->device);
 	if (ret < 0)
 	{
-		printf(
+		csp_print(
 				"[%s] can_stop() failed, but will continue the cleannp. error: %d",
 				iface->name, ret);
 	}
@@ -885,7 +906,7 @@ int csp_can_stop(csp_iface_t *iface)
 
 //	csp_can_remove_rx_filter(ctx);
 
-	printf("Stop CAN interface: %s. ret: %d", iface->name, ret);
+	csp_print("Stop CAN interface: %s. ret: %d", iface->name, ret);
 
 //	free(ctx);
 
@@ -922,7 +943,7 @@ int csp_can_tx_frame(void *driver_data, uint32_t id, const uint8_t *data,
 	ret = HAL_CAN_AddTxMessage(ctx->device, &txHeader, buf, &canMailbox);
 	if (ret < 0)
 	{
-		printf("[%s] can_send() failed, errno %d", ctx->name, ret);
+		csp_print("[%s] can_send() failed, errno %d", ctx->name, ret);
 	}
 	HAL_GPIO_TogglePin(LD5_GPIO_Port, LD5_Pin);
 	end:

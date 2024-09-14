@@ -19,18 +19,11 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
-#include "can.h"
-#include "crc.h"
 #include "fatfs.h"
-#include "i2c.h"
-#include "i2s.h"
-#include "mbedtls.h"
-#include "rng.h"
-#include "rtc.h"
-#include "spi.h"
 #include "usart.h"
 #include "usb_host.h"
 #include "gpio.h"
+#include "mbedtls.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -99,17 +92,9 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_I2C1_Init();
-//  MX_I2S3_Init();
-  MX_SPI1_Init();
-//  MX_CAN1_Init();
-//  MX_CRC_Init();
-//  MX_RNG_Init();
-	MX_RTC_Init();
-//  MX_FATFS_Init();
   MX_USART2_UART_Init();
   /* Call PreOsInit function */
-//  MX_MBEDTLS_Init();
+  MX_MBEDTLS_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */

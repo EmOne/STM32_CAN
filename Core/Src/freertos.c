@@ -50,20 +50,20 @@ evState_t ev =
 		EV_NONE };
 
 /* USER CODE END Variables */
-/* Definitions for defaultTask */
-osThreadId_t defaultTaskHandle;
-const osThreadAttr_t defaultTask_attributes = {
-  .name = "defaultTask",
+/* Definitions for blinkTask */
+osThreadId_t blinkTaskHandle;
+const osThreadAttr_t blinkTask_attributes = {
+  .name = "blinkTask",
   .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
+  .priority =
+		(osPriority_t) osPriorityLow,
 };
 /* Definitions for canDefaultTask */
 osThreadId_t canDefaultTaskHandle;
 const osThreadAttr_t canDefaultTask_attributes = {
   .name = "canDefaultTask",
   .stack_size = 1024 * 4,
-  .priority =
-		(osPriority_t) osPriorityNormal,
+  .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for canRouterTask */
 osThreadId_t canRouterTaskHandle;
@@ -71,7 +71,7 @@ const osThreadAttr_t canRouterTask_attributes = {
   .name = "canRouterTask",
   .stack_size = 256 * 4,
   .priority =
-		(osPriority_t) osPriorityNormal,
+		(osPriority_t) osPriorityLow,
 };
 /* Definitions for canServerTask */
 osThreadId_t canServerTaskHandle;
@@ -79,7 +79,7 @@ const osThreadAttr_t canServerTask_attributes = {
   .name = "canServerTask",
   .stack_size = 1024 * 4,
   .priority =
-		(osPriority_t) osPriorityNormal,
+		(osPriority_t) osPriorityLow,
 };
 /* Definitions for canClientTask */
 osThreadId_t canClientTaskHandle;
@@ -87,12 +87,17 @@ const osThreadAttr_t canClientTask_attributes = {
   .name = "canClientTask",
   .stack_size = 1024 * 4,
   .priority =
-		(osPriority_t) osPriorityNormal,
+		(osPriority_t) osPriorityLow,
 };
 /* Definitions for canRxMsgQueue */
 osMessageQueueId_t canRxMsgQueueHandle;
 const osMessageQueueAttr_t canRxMsgQueue_attributes = {
   .name = "canRxMsgQueue"
+};
+/* Definitions for blinkTimer */
+osTimerId_t blinkTimerHandle;
+const osTimerAttr_t blinkTimer_attributes = {
+  .name = "blinkTimer"
 };
 /* Definitions for coreBinarySem */
 osSemaphoreId_t coreBinarySemHandle;
@@ -105,11 +110,12 @@ const osSemaphoreAttr_t coreBinarySem_attributes = {
 
 /* USER CODE END FunctionPrototypes */
 
-void StartDefaultTask(void *argument);
+void blinkStartTask(void *argument);
 void canStartDefaultTask(void *argument);
 void canStartRouterTask(void *argument);
 void canStartServerTask(void *argument);
 void canStartClientTask(void *argument);
+void blinkCallback(void *argument);
 
 extern void MX_USB_HOST_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -136,40 +142,42 @@ void MX_FREERTOS_Init(void) {
   /* add semaphores, ... */
   /* USER CODE END RTOS_SEMAPHORES */
 
+  /* Create the timer(s) */
+  /* creation of blinkTimer */
+  blinkTimerHandle = osTimerNew(blinkCallback, osTimerOnce, NULL, &blinkTimer_attributes);
+
   /* USER CODE BEGIN RTOS_TIMERS */
   /* start timers, add new ones, ... */
   /* USER CODE END RTOS_TIMERS */
 
   /* Create the queue(s) */
   /* creation of canRxMsgQueue */
-  canRxMsgQueueHandle = osMessageQueueNew (16, sizeof(uint16_t), &canRxMsgQueue_attributes);
+	canRxMsgQueueHandle = osMessageQueueNew(32, sizeof(uint8_t) * 16,
+			&canRxMsgQueue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* creation of defaultTask */
-//  defaultTaskHandle = osThreadNew(StartDefaultTask, (void*) &ev, &defaultTask_attributes);
+  /* creation of blinkTask */
+//  blinkTaskHandle = osThreadNew(blinkStartTask, (void*) &ev, &blinkTask_attributes);
 
   /* creation of canDefaultTask */
   canDefaultTaskHandle = osThreadNew(canStartDefaultTask, (void*) &ev, &canDefaultTask_attributes);
 
   /* creation of canRouterTask */
-//	canRouterTaskHandle = osThreadNew(canStartRouterTask, (void*) &ev,
-//			&canRouterTask_attributes);
+  canRouterTaskHandle = osThreadNew(canStartRouterTask, (void*) &ev, &canRouterTask_attributes);
 
   /* creation of canServerTask */
-//  canServerTaskHandle = osThreadNew(canStartServerTask, (void*) &ev, &canServerTask_attributes);
+  canServerTaskHandle = osThreadNew(canStartServerTask, (void*) &ev, &canServerTask_attributes);
 
   /* creation of canClientTask */
-//  canClientTaskHandle = osThreadNew(canStartClientTask, (void*) &ev, &canClientTask_attributes);
+  canClientTaskHandle = osThreadNew(canStartClientTask, (void*) &ev, &canClientTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
-//	osThreadSuspend(canRouterTaskHandle);
-//	osThreadSuspend(canServerTaskHandle);
-//	osThreadSuspend(canClientTaskHandle);
+
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -178,50 +186,25 @@ void MX_FREERTOS_Init(void) {
 
 }
 
-/* USER CODE BEGIN Header_StartDefaultTask */
+/* USER CODE BEGIN Header_blinkStartTask */
 /**
-  * @brief  Function implementing the defaultTask thread.
+  * @brief  Function implementing the blinkTask thread.
   * @param  argument: Not used
   * @retval None
   */
-/* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void *argument)
+/* USER CODE END Header_blinkStartTask */
+__weak void blinkStartTask(void *argument)
 {
   /* init code for USB_HOST */
   MX_USB_HOST_Init();
-  /* USER CODE BEGIN StartDefaultTask */
+  /* USER CODE BEGIN blinkStartTask */
 
   /* Infinite loop */
   for(;;)
   {
-		//Event cur_event = event_check();
-		//		switch(currentMode) {
-		//			case POST:
-		//				currentMode = POST_function(cur_event);
-		//				break;
-		//			case IDLE:
-		//				currentMode = IDLE_function(cur_event);
-		//				break;
-		//			case SETTING:
-		//				currentMode = SETTING_function(cur_event);
-		//				break;
-		//			case RUNNING:
-		//				currentMode = RUNNING_function(cur_event);
-		//				break;
-		//			case ALARM:
-		//				currentMode = ALARM_function(cur_event);
-		//				break;
-		//			case FAILSAFE:
-		//				currentMode = FAILSAFE_function(cur_event);
-		//				break;
-		//			default:
-		//				currentMode = currentMode;
-		// 				break;
-		//		}
-
-//    osDelay(1);
+    osDelay(1);
   }
-  /* USER CODE END StartDefaultTask */
+  /* USER CODE END blinkStartTask */
 }
 
 /* USER CODE BEGIN Header_canStartDefaultTask */
@@ -294,6 +277,14 @@ __weak void canStartClientTask(void *argument)
     osDelay(1);
   }
   /* USER CODE END canStartClientTask */
+}
+
+/* blinkCallback function */
+void blinkCallback(void *argument)
+{
+  /* USER CODE BEGIN blinkCallback */
+
+  /* USER CODE END blinkCallback */
 }
 
 /* Private application code --------------------------------------------------*/
