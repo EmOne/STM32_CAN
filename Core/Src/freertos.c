@@ -55,8 +55,7 @@ osThreadId_t blinkTaskHandle;
 const osThreadAttr_t blinkTask_attributes = {
   .name = "blinkTask",
   .stack_size = 128 * 4,
-  .priority =
-		(osPriority_t) osPriorityLow,
+  .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for canDefaultTask */
 osThreadId_t canDefaultTaskHandle;
@@ -70,24 +69,21 @@ osThreadId_t canRouterTaskHandle;
 const osThreadAttr_t canRouterTask_attributes = {
   .name = "canRouterTask",
   .stack_size = 256 * 4,
-  .priority =
-		(osPriority_t) osPriorityLow,
+  .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for canServerTask */
 osThreadId_t canServerTaskHandle;
 const osThreadAttr_t canServerTask_attributes = {
   .name = "canServerTask",
   .stack_size = 1024 * 4,
-  .priority =
-		(osPriority_t) osPriorityLow,
+  .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for canClientTask */
 osThreadId_t canClientTaskHandle;
 const osThreadAttr_t canClientTask_attributes = {
   .name = "canClientTask",
   .stack_size = 1024 * 4,
-  .priority =
-		(osPriority_t) osPriorityLow,
+  .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for canRxMsgQueue */
 osMessageQueueId_t canRxMsgQueueHandle;
@@ -98,6 +94,11 @@ const osMessageQueueAttr_t canRxMsgQueue_attributes = {
 osTimerId_t blinkTimerHandle;
 const osTimerAttr_t blinkTimer_attributes = {
   .name = "blinkTimer"
+};
+/* Definitions for canSendMutex */
+osMutexId_t canSendMutexHandle;
+const osMutexAttr_t canSendMutex_attributes = {
+  .name = "canSendMutex"
 };
 /* Definitions for coreBinarySem */
 osSemaphoreId_t coreBinarySemHandle;
@@ -129,6 +130,9 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN Init */
 
   /* USER CODE END Init */
+  /* Create the mutex(es) */
+  /* creation of canSendMutex */
+  canSendMutexHandle = osMutexNew(&canSendMutex_attributes);
 
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
@@ -152,8 +156,7 @@ void MX_FREERTOS_Init(void) {
 
   /* Create the queue(s) */
   /* creation of canRxMsgQueue */
-	canRxMsgQueueHandle = osMessageQueueNew(32, sizeof(uint8_t) * 16,
-			&canRxMsgQueue_attributes);
+  canRxMsgQueueHandle = osMessageQueueNew (16, sizeof(uint16_t), &canRxMsgQueue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
@@ -161,7 +164,7 @@ void MX_FREERTOS_Init(void) {
 
   /* Create the thread(s) */
   /* creation of blinkTask */
-//  blinkTaskHandle = osThreadNew(blinkStartTask, (void*) &ev, &blinkTask_attributes);
+  blinkTaskHandle = osThreadNew(blinkStartTask, (void*) &ev, &blinkTask_attributes);
 
   /* creation of canDefaultTask */
   canDefaultTaskHandle = osThreadNew(canStartDefaultTask, (void*) &ev, &canDefaultTask_attributes);

@@ -30,13 +30,13 @@ uint8_t csend[32] =
 CAN_FilterTypeDef canfil; //CAN Bus Filter
 uint32_t canMailbox; //CAN Bus Mail box variable
 uint8_t flagRecv = 0;
-Mode *currentMode;
 
 /* Server port, the port the server listens on for incoming connections from the client. */
 #define MY_SERVER_PORT		10
+#define SERVER_TC_PORT		13
 #define SERVER_ACK_PORT		14
 #define SERVER_STATUS_PORT	15
-#define SERVER_TC_PORT		16
+
 
 /* Commandline options */
 static uint8_t server_address = 11;
@@ -52,33 +52,14 @@ extern osThreadId_t canServerTaskHandle;
 extern osThreadAttr_t canServerTask_attributes;
 extern osThreadId_t canClientTaskHandle;
 extern osThreadAttr_t canClientTask_attributes;
-
+extern osMutexId_t canSendMutexHandle;
 //Extend CSP_DBG_ERR
 
 #define CSP_DBG_ERR_INVALID_CAN_CONFIG 13
 #define CONFIG_CSP_CAN_RX_MSGQ_DEPTH 10
 
 /** Driver configration */
-typedef struct
-{
-	char name[CSP_IFLIST_NAME_MAX + 1];
-	can_mode_e mode;
-	uint32_t id;
-	uint32_t id_l3bc;
-	uint32_t id_l2bc;
-	uint32_t mask;
-	csp_can_interface_data_t ifdata;
-	SemaphoreHandle_t lock;
-	StaticSemaphore_t lock_buf;
-	csp_iface_t interface;
-	CAN_HandleTypeDef *device;
-	osMessageQId rx_msgq;
-	osEvent stop_can_event;
-	osThreadId_t rx_thread;
-	uint8_t rx_msgq_buf[sizeof(CAN_FIFOMailBox_TypeDef)
-			* CONFIG_CSP_CAN_RX_MSGQ_DEPTH];
-	int filter_id;
-} can_context_t;
+
 
 can_context_t mcan[1] =
 {
@@ -101,17 +82,17 @@ void MX_CAN1_Init(void)
 
   /* USER CODE END CAN1_Init 1 */
   hcan1.Instance = CAN1;
-  hcan1.Init.Prescaler = 6;
+  hcan1.Init.Prescaler = 42;
   hcan1.Init.Mode = CAN_MODE_NORMAL;
-  hcan1.Init.SyncJumpWidth = CAN_SJW_2TQ;
+  hcan1.Init.SyncJumpWidth = CAN_SJW_4TQ;
   hcan1.Init.TimeSeg1 = CAN_BS1_3TQ;
-  hcan1.Init.TimeSeg2 = CAN_BS2_3TQ;
+  hcan1.Init.TimeSeg2 = CAN_BS2_4TQ;
   hcan1.Init.TimeTriggeredMode = DISABLE;
   hcan1.Init.AutoBusOff = ENABLE;
   hcan1.Init.AutoWakeUp = ENABLE;
   hcan1.Init.AutoRetransmission = ENABLE;
-  hcan1.Init.ReceiveFifoLocked = DISABLE;
-  hcan1.Init.TransmitFifoPriority = DISABLE;
+  hcan1.Init.ReceiveFifoLocked = ENABLE;
+  hcan1.Init.TransmitFifoPriority = ENABLE;
   if (HAL_CAN_Init(&hcan1) != HAL_OK)
   {
     Error_Handler();
@@ -190,6 +171,19 @@ void HAL_CAN_MspDeInit(CAN_HandleTypeDef* canHandle)
 }
 
 /* USER CODE BEGIN 1 */
+void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan)
+{
+  if (hcan != NULL) {
+    if (hcan->Instance == CAN1) {
+      can_async_disable(hcan);
+      mcan[0].interface.tx_error++;
+      can_async_enable(hcan);
+      return;
+    }
+  }
+}
+
+
 void HAL_CAN_RxFifo0FullCallback(CAN_HandleTypeDef *hcan)
 {
 	if (hcan != NULL)
@@ -202,7 +196,10 @@ void HAL_CAN_RxFifo0FullCallback(CAN_HandleTypeDef *hcan)
 
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
-	int xTaskWoken = pdFALSE;
+	BaseType_t xTaskWoken = pdFALSE;
+#if CAN_DEFER_TASK
+	vTaskNotifyGiveFromISR(can_task_handle, &xTaskWoken);
+#else
 //	HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_SET);
 	if (hcan != NULL)
 	{
@@ -223,13 +220,14 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 			 * (This can also be deferred to a task with: csp_can_process_frame_deferred) */
 				csp_can_rx(&mcan[0].interface, rxHeader.ExtId, canRX,
 						rxHeader.DLC,
-					&xTaskWoken);
+					(int*) &xTaskWoken);
 			}
 
 		}
 	}
 //	HAL_GPIO_WritePin(LD6_GPIO_Port, LD6_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_TogglePin(LD6_GPIO_Port, LD6_Pin);
+#endif
 	portYIELD_FROM_ISR(xTaskWoken);
 
 }
@@ -239,7 +237,7 @@ void canStartDefaultTask(void *argument)
 	/* Infinite loop */
 	static uint16_t seq = 0;
 	uint8_t fR = 0;
-	currentMode = &((evState_t*) argument)->comm;
+	Mode * currentMode = &((evState_t*) argument)->comm;
 
 //	int ret;
 	uint8_t address = 0;
@@ -268,19 +266,20 @@ void canStartDefaultTask(void *argument)
 	address = 11;
 	server_address = 10;
 	const CAN_HandleTypeDef *device = &hcan1;
-	uint32_t bitrate = 1000000;
+	uint32_t bitrate = 125000;
 
-	uint16_t filter_addr = address;
+	uint16_t filter_addr = server_address;
 	uint16_t filter_mask = 0; //x3FFF;
+        int error;
 
 	for (;;)
 	{
 //		Event cur_event = event_check();
-		switch (*currentMode)
+		switch ((Mode)(*currentMode))
 		{
 		case POST:
 			//				currentMode = POST_function(cur_event)
-			int error = csp_can_open_and_add_interface(device, ifname, address,
+			error = csp_can_open_and_add_interface(device, ifname, address,
 					bitrate, filter_addr, filter_mask, &can_iface);
 			if (error != CSP_ERR_NONE)
 			{
@@ -349,7 +348,7 @@ void canStartDefaultTask(void *argument)
 //			(default_iface == NULL))
 //			{ /* no interfaces specified -> run server & client via loopback */
 //				client_start();
-//			osThreadResume(canClientTaskHandle);
+			osThreadResume(canClientTaskHandle);
 //			canClientTaskHandle = osThreadNew(canStartClientTask, argument,
 //					&canClientTask_attributes);
 //			}
@@ -358,6 +357,7 @@ void canStartDefaultTask(void *argument)
 			break;
 		case IDLE:
 		//				currentMode = IDLE_function(cur_event);
+			osDelay(3);
 			if (test_mode)
 			{
 				/* Test mode is intended for checking that host & client can exchange packets over loopback */
@@ -461,7 +461,7 @@ void canStartDefaultTask(void *argument)
 
 void canStartRouterTask(void *argument)
 {
-	currentMode = &((evState_t*) argument)->comm;
+//	Mode * currentMode = &((evState_t*) argument)->comm;
 
 	for (;;)
 	{
@@ -496,9 +496,25 @@ void canStartRouterTask(void *argument)
 	}
 }
 
+void TC_RECV_Handler(csp_packet_t *packet)
+{
+	/* TODO:  ACK*/
+	csp_packet_t *ack_packet = csp_buffer_get(0);
+	ack_packet->length = sprintf((char*) ack_packet->data, "%s", packet->data);
+	memset(ack_packet->data + 2, '1', 1);
+	memset(ack_packet->data + ack_packet->length, 0, 1);
+	ack_packet->length++;
+	csp_sendto_reply(packet, ack_packet, CSP_O_SAME);
+	//				csp_can_send_ack(ack_packet, server_address, 1000, CSP_O_NONE);
+	csp_print("ACK Packet send on PORT (%d): %s (%ld)\n", SERVER_ACK_PORT,
+			(char* ) ack_packet->data, ack_packet->length);
+	csp_buffer_free(ack_packet);
+	csp_buffer_free(packet);
+}
+
 void canStartServerTask(void *argument)
 {
-	currentMode = &((evState_t*) argument)->comm;
+//	Mode * currentMode = &((evState_t*) argument)->comm;
 
 	csp_socket_t sock =
 	{ 0 };
@@ -506,15 +522,17 @@ void canStartServerTask(void *argument)
 
 	csp_print("Server task started\n");
 
+	csp_bind_callback(TC_RECV_Handler, SERVER_TC_PORT);
 	/* Bind socket to all ports, e.g. all incoming connections will be handled here */
 	csp_bind(&sock, CSP_ANY);
 
-	/* Create a backlog of 10 connections, i.e. up to 10 new connections can be queued */
-	csp_listen(&sock, 10);
 
-	osThreadResume(canClientTaskHandle);
+	/* Create a backlog of 10 connections, i.e. up to 10 new connections can be queued */
+	csp_listen(&sock, 64);
+
 	for (;;)
 	{
+		ulTaskNotifyTake(true, 1 * configTICK_RATE_HZ);
 //		/* Wait for a new connection, 10000 mS timeout */
 		csp_conn_t *conn;
 		if ((conn = csp_accept(&sock, 10000)) == NULL)
@@ -523,7 +541,7 @@ void canStartServerTask(void *argument)
 			continue;
 		}
 
-		/* Read packets on connection, timout is 100 mS */
+		/* Read packets on connection, timout is 10 mS */
 		csp_packet_t *packet;
 		while ((packet = csp_read(conn, 50)) != NULL)
 		{
@@ -531,30 +549,12 @@ void canStartServerTask(void *argument)
 			switch (dp)
 			{
 			case SERVER_TC_PORT:
-			case MY_SERVER_PORT:
 				/* Process packet here */
 				csp_print("TC Packet received on PORT (%d): %s (%ld)\n", dp,
-						(char*) packet->data, packet->length);
-
-				/* TODO:  ACK*/
-				csp_packet_t *ack_packet = csp_buffer_get(0);
-				ack_packet->length = sprintf((char*) ack_packet->data, "%s",
-						packet->data);
-
-				memset(ack_packet->data + 2, '1', 1);
-				memset(ack_packet->data + ack_packet->length, 0, 1);
-				ack_packet->length++;
-
-				csp_can_send_ack(ack_packet, server_address, 1000, CSP_O_NONE);
-
-				csp_print("ACK Packet send on PORT (%d): %s (%ld)\n",
-						SERVER_ACK_PORT,
-						(char*) ack_packet->data, ack_packet->length);
-
-				csp_buffer_free(ack_packet);
-				csp_buffer_free(packet);
-				++server_received;
-
+						(char* ) packet->data, packet->length)
+				;
+				TC_RECV_Handler(packet);
+				server_received++;
 				break;
 
 			default:
@@ -572,15 +572,16 @@ void canStartServerTask(void *argument)
 /* Client task sending requests to server task */
 void canStartClientTask(void *argument)
 {
-	currentMode = &((evState_t*) argument)->comm;
+//	Mode * currentMode = &((evState_t*) argument)->comm;
 
 	uint16_t count = 0;
 	uint16_t server_addr = 10;
-
+	int dport = SERVER_STATUS_PORT;
 	csp_print("Client task started\n");
 
 	for (;;)
 	{
+		ulTaskNotifyTake(true, 1 * configTICK_RATE_HZ);
 		//		k_sleep(test_mode ? K_USEC(200000) : K_USEC(1000000));
 		osDelay(test_mode ? 200 : 1000);
 		HAL_GPIO_TogglePin(LD4_GPIO_Port, LD4_Pin);
@@ -595,10 +596,7 @@ void canStartClientTask(void *argument)
 //			csp_print("reboot system request sent to address: %u\n", server_addr);
 			continue;
 		}
-		else
-		{
-			osDelay(1000);
-		}
+
 		/* Send data packet (string) to server */
 
 		/* 1. Get packet buffer for message/data */
@@ -607,7 +605,7 @@ void canStartClientTask(void *argument)
 		{
 			/* Could not get buffer element */
 			csp_print("Failed to get CSP buffer\n");
-			return;
+			continue;
 		}
 
 		/* 2. Copy data to packet */
@@ -626,7 +624,7 @@ void canStartClientTask(void *argument)
 		}
 
 		memset(packet->data + alen, 0, 1);
-		alen += 1;
+		alen++;
 		csp_print("(%d)\n", alen);
 		count++;
 
@@ -634,13 +632,14 @@ void canStartClientTask(void *argument)
 		packet->length = alen; //(strlen((char*) packet->data) + 1); /* include the 0 termination */
 
 		/* 4. Connect to host on 'server_address', port MY_SERVER_PORT with regular UDP-like protocol and 1000 ms timeout */
-		csp_conn_t *conn = csp_connect(CSP_PRIO_NORM, server_addr,
-		SERVER_STATUS_PORT, 1000, CSP_O_NONE);
+		csp_conn_t *conn = csp_connect(CSP_PRIO_NORM, server_addr, dport, 1000,
+		CSP_O_NONE);
 		if (conn == NULL)
 		{
 			/* Connect failed */
 			csp_print("Connection failed\n");
-			return;
+			csp_buffer_free(packet);
+			continue;
 		}
 
 		/* 5. Send packet */
@@ -678,7 +677,8 @@ int csp_can_open_and_add_interface(const CAN_HandleTypeDef *device,
 	if (csp_conf->version == 2)
 	{
 
-		canfil.FilterMaskIdLow = CFP2_DST_MASK << CFP2_DST_OFFSET;
+//		canfil.FilterMaskIdLow = CFP2_DST_MASK << CFP2_DST_OFFSET;
+		canfil.FilterMaskIdHigh = netmask << CFP2_DST_OFFSET;
 
 		mcan[0].id = address << CFP2_DST_OFFSET;
 		mcan[0].id_l3bc = ((1 << (csp_id_get_host_bits() - netmask)) - 1)
@@ -734,9 +734,9 @@ int csp_can_open_and_add_interface(const CAN_HandleTypeDef *device,
 	ctx->ifdata.pbufs = NULL;
 	ctx->device = (CAN_HandleTypeDef*) device;
 	ctx->filter_id = -1;
-//	ctx->stop_can_event = osEventFlagsNew((osEventFlagsAttr_t*
-//			)
-//			{ 0 });
+	ctx->stop_can_event = osEventFlagsNew((osEventFlagsAttr_t*
+			)
+			{ 0 });
 
 	csp_print(
 			"INIT %s: device, local address: %d, bitrate: %ld: filter add: %d, filter mask: 0x%04x\n",
@@ -804,8 +804,6 @@ int csp_can_open_and_add_interface(const CAN_HandleTypeDef *device,
 		*return_iface = &ctx->interface;
 	}
 
-	return ret;
-
 	/*
 	 * The following section is for restoring acquired resources when
 	 * something fails. Unfortunately, we can't take any action if the
@@ -851,19 +849,19 @@ int csp_can_set_rx_filter(csp_iface_t *iface, uint16_t filter_addr,
 
 	if (csp_conf.version == 1)
 	{
-//		filter->FilterIdHigh = CFP_MAKE_DST(filter_addr);
-//		filter->FilterMaskIdHigh = CFP_MAKE_DST(filter_mask);
+		filter->FilterIdHigh = CFP_MAKE_DST(filter_addr);
+		filter->FilterMaskIdHigh = CFP_MAKE_DST(filter_mask);
 
-		filter->FilterIdLow = CFP_MAKE_DST(filter_addr);
-		filter->FilterMaskIdLow = CFP_MAKE_DST(filter_mask);
+		//filter->FilterIdLow = CFP_MAKE_DST(filter_addr);
+		//filter->FilterMaskIdLow = CFP_MAKE_DST(filter_mask);
 	}
 	else
 	{
-//		filter->FilterIdHigh = filter_addr << CFP2_DST_OFFSET;
-//		filter->FilterMaskIdHigh = filter_mask << CFP2_DST_OFFSET;
+		filter->FilterIdHigh = filter_addr << CFP2_DST_OFFSET;
+		filter->FilterMaskIdHigh = filter_mask << CFP2_DST_OFFSET;
 
-		filter->FilterIdLow = filter_addr << CFP2_DST_OFFSET;
-		filter->FilterMaskIdLow = filter_mask << CFP2_DST_OFFSET;
+		//filter->FilterIdLow = filter_addr << CFP2_DST_OFFSET;
+		//filter->FilterMaskIdLow = filter_mask << CFP2_DST_OFFSET;
 	}
 
 	filter->FilterBank = 0;
@@ -925,48 +923,99 @@ int csp_can_stop(csp_iface_t *iface)
 	end: return ret;
 }
 
-int csp_can_tx_frame(void *driver_data, uint32_t id, const uint8_t *data,
-		uint8_t dlc)
+void can_async_disable(void *dev)
 {
-	uint8_t buf[32] =
-	{ 0 };
+	HAL_CAN_Stop(&hcan1);
+}
+void can_async_enable(void *dev)
+{
+	HAL_CAN_Start(&hcan1);
+}
+
+int can_async_write(void * dev, struct can_message * msg)
+{
+        txHeader.StdId = msg->id;
+	txHeader.ExtId = msg->extid;
+	txHeader.RTR = msg->type;
+	txHeader.DLC = msg->len;
+	txHeader.IDE = msg->fmt;
+	txHeader.TransmitGlobalTime = ENABLE;
+#if defined (STM32F407xx)
+        return HAL_CAN_AddTxMessage((CAN_HandleTypeDef * ) dev, &txHeader, msg->data, &canMailbox);
+#else
+//Other platform CAN message transmit
+#endif
+        
+}
+
+void can_async_set_filter(void * dev, int filter_block, int can_ide, void * filter)
+{
+}
+
+int csp_can_tx_frame(void *driver_data, uint32_t id, const uint8_t *data,
+		uint8_t dlc) {
 	int ret = CSP_ERR_NONE;
-//	struct can_frame frame =
-//	{ 0 };
-	can_context_t *ctx = driver_data;
-	if (dlc > 8) //CAN_MAX_DLC)
+	
+	can_context_t * ctx = driver_data;
+	
+        if ((ctx == NULL) || (ctx->lock == NULL)) {
+		return 0;
+	}
+        
+        if (dlc > CAN_MAX_DLC)
 	{
 		ret = CSP_ERR_INVAL;
 		goto end;
 	}
 
-//	frame.id = id;
-//	frame.dlc = dlc;
-//	frame.flags = CAN_FRAME_IDE;
-	txHeader.StdId = 0;
-	txHeader.ExtId = id;
-	txHeader.RTR = 0;
-	txHeader.DLC = dlc;
-	txHeader.IDE = CAN_ID_EXT;
-	txHeader.TransmitGlobalTime = ENABLE;
-	memcpy(buf, data, dlc);
-
+	struct can_message msg;
+	msg.extid = id;
+	msg.type = CAN_TYPE_DATA;
+	msg.data = (uint8_t * ) data;
+	msg.len = dlc;
+	msg.fmt  = CAN_FMT_EXTID;
+        
+        /* Task locking */
+	while(xSemaphoreTake(ctx->lock, 1) == pdFALSE);
+#if 0
 //	ret = can_send(ctx->device, &frame, CSP_CAN_TX_TIME_OUT, NULL, NULL);
 	ret = HAL_CAN_AddTxMessage(ctx->device, &txHeader, buf, &canMailbox);
 	if (ret < 0)
 	{
 		csp_print("[%s] can_send() failed, errno %d", ctx->name, ret);
 	}
-	HAL_GPIO_TogglePin(LD5_GPIO_Port, LD5_Pin);
+#else
+        /**
+	 * Blocking IO:
+	 *
+	 * With CAN blocking IO is needed because we only have room for 32 frames or 256 bytes.
+	 * This is barely enough to hold a large CSP packet
+	 * We could go for async transmission with software queues, this will allow for larger amounts
+	 * of data to be queued. However in this case, simplicity is chosen over performance.
+	 * When the TX FIFO is full, we ask the task to sleep a tick.
+	 * Usually data heavy fuctions are running in their separate tasks anyways.
+	 * A CAN frame is 96 bits and is transmitted within 96 us.
+	 * A tick period can vary from 1 to 10 ms (typically)
+	 * 3 retries have been chosen because a futher dealy than this would almost certainly be
+	 * due to an error.
+	 */
+	int attempts = 3;
+	while((attempts > 0) && (can_async_write((void * ) (ctx->device), &msg) != ERR_NONE)) {
+		vTaskDelay(1);
+		attempts--;
+	}
+  #endif
+        HAL_GPIO_TogglePin(LD5_GPIO_Port, LD5_Pin);
+        /* Unlock */
+	xSemaphoreGive(ctx->lock);
+	
 	end:
 	return ret;
 }
 
 int csp_can_send_ack(csp_packet_t *packet, uint16_t node, uint32_t timeout,
-		uint8_t conn_options)
-{
-	unsigned int i;
-	uint32_t start, time, status = 0;
+		uint8_t conn_options) {
+	uint32_t start, time;
 
 	/* Counter */
 	start = csp_get_ms();
@@ -988,5 +1037,136 @@ int csp_can_send_ack(csp_packet_t *packet, uint16_t node, uint32_t timeout,
 	time = (csp_get_ms() - start);
 
 	return time;
+}
+
+
+
+#ifndef CAN_DEFER_TASK
+#define CAN_DEFER_TASK 0
+#endif
+
+#if CAN_DEFER_TASK
+static StaticTask_t can_task_tcb;
+static StackType_t can_task_stack[500];
+static TaskHandle_t can_task_handle;
+#endif
+
+
+#if CAN_DEFER_TASK
+void CAN_0_rx_callback_task(struct can_async_descriptor *const descr) {
+	BaseType_t xTaskWoken = pdFALSE;
+	vTaskNotifyGiveFromISR(can_task_handle, &xTaskWoken);
+	portYIELD_FROM_ISR(xTaskWoken);
+}
+
+static void can_task(void * param) {
+	
+	while(1) {
+
+		ulTaskNotifyTake(true, 1 * configTICK_RATE_HZ);
+
+		int xTaskWoken = pdFALSE;
+		struct can_message msg;
+		uint8_t data[8];
+		msg.data = data;
+
+		while(can_async_read(&CAN_0, &msg) == ERR_NONE) {
+
+			//csp_hex_dump("rx", msg.data, msg.len);
+
+			/* Process frame within ISR
+			* (This can also be deferred to a task with: csp_can_process_frame_deferred) */
+			csp_can_rx(&mcan[0].interface, msg.id, msg.data, msg.len, &xTaskWoken);
+
+		}
+
+		if (xTaskWoken) {
+			portYIELD();
+		}
+
+	}
+
+}
+#endif
+
+csp_iface_t * csp_driver_can_init(int addr, int netmask, int id, can_mode_e mode, uint32_t bitrate) {
+
+	/* Create a mutex type semaphore. */
+	mcan[id].lock = xSemaphoreCreateMutexStatic(&mcan[id].lock_buf);
+
+	const csp_conf_t *csp_conf = csp_get_conf();
+
+	/* Generate ID */
+    uint32_t can_mask = 0;
+    if (csp_conf->version == 2) {
+        
+        can_mask = CFP2_DST_MASK << CFP2_DST_OFFSET;
+
+        mcan[id].id = addr << CFP2_DST_OFFSET;
+        mcan[id].id_l3bc = ((1 << (csp_id_get_host_bits() - netmask)) - 1) << CFP2_DST_OFFSET;
+        mcan[id].id_l2bc = 0x3FFF << CFP2_DST_OFFSET;
+    } else {
+
+        can_mask = CFP_MAKE_DST((1 << CFP_HOST_SIZE) - 1);
+
+        mcan[id].id = CFP_MAKE_DST(addr);
+        mcan[id].id_l2bc = 0; //! Not supported on CSP1
+        mcan[id].id_l3bc = 0; //! Not supported on CSP1
+    }
+
+	if (mode == CSP_CAN_MASKED) {
+		mcan[id].mask = can_mask;
+	} else if (mode == CSP_CAN_PROMISC) {
+		mcan[id].mask = 0;
+	} else {
+		csp_dbg_errno = CSP_DBG_ERR_INVALID_CAN_CONFIG;
+		return NULL;
+	}
+
+	mcan[id].ifdata.tx_func = csp_can_tx_frame;
+	mcan[id].ifdata.pbufs = NULL;
+	mcan[id].interface.interface_data = &mcan[id].ifdata;
+
+	mcan[id].interface.addr = addr;
+	mcan[id].interface.netmask = netmask;
+
+	/* Regsiter interface */
+	csp_can_add_interface(&mcan[id].interface);
+
+#if CAN_DEFER_TASK
+	/* CAN task */
+	can_async_register_callback(&CAN_0, CAN_ASYNC_RX_CB, (FUNC_PTR)CAN_0_rx_callback_task);
+	can_task_handle = xTaskCreateStatic(can_task, "CAN", 500, NULL, 1, can_task_stack, &can_task_tcb);
+
+#else
+
+	/* CAN ISR */
+	can_async_register_callback(&hcan1, CAN_ASYNC_RX_CB, (FUNC_PTR)HAL_CAN_RxFifo0MsgPendingCallback);
+#endif
+
+	can_async_register_callback(&hcan1, CAN_ASYNC_IRQ_CB, (FUNC_PTR)HAL_CAN_ErrorCallback);
+	can_async_enable(&hcan1);
+
+    /* Filter for own address */
+    struct can_filter filter;
+    filter.id   = mcan[id].id;
+    filter.mask = mcan[id].mask;
+    //csp_print("H filter %x %x\n", filter.id, filter.mask);
+    can_async_set_filter(&hcan1, 0, CAN_FMT_EXTID, &filter);
+
+    /* Filter for subnet broadcast address */
+    filter.id   = mcan[id].id_l3bc;
+    filter.mask = mcan[id].mask;
+    //csp_print("L3 filter %x %x\n", filter.id, filter.mask);
+    can_async_set_filter(&hcan1, 1, CAN_FMT_EXTID, &filter);
+
+    /* Filter for layer-2 broadcast */
+    filter.id   = mcan[id].id_l2bc;
+    filter.mask = mcan[id].mask;
+    //csp_print("L2 filter %x %x\n", filter.id, filter.mask);
+    can_async_set_filter(&hcan1, 2, CAN_FMT_EXTID, &filter);
+
+	return &mcan[id].interface;
+
 }
 /* USER CODE END 1 */
