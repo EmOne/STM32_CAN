@@ -499,13 +499,16 @@ void canStartRouterTask(void *argument)
 void TC_RECV_Handler(csp_packet_t *packet)
 {
 	/* TODO:  ACK*/
+	csp_print("TC Packet received on PORT (%d): %s (%ld)\n",
+			SERVER_TC_PORT,
+			(char* ) packet->data, packet->length);
 	csp_packet_t *ack_packet = csp_buffer_get(0);
 	ack_packet->length = sprintf((char*) ack_packet->data, "%s", packet->data);
 	memset(ack_packet->data + 2, '1', 1);
 	memset(ack_packet->data + ack_packet->length, 0, 1);
 	ack_packet->length++;
-	csp_sendto_reply(packet, ack_packet, CSP_O_SAME);
-	//				csp_can_send_ack(ack_packet, server_address, 1000, CSP_O_NONE);
+//	csp_sendto_reply(packet, ack_packet, CSP_O_SAME);
+	csp_can_send_ack(ack_packet, server_address, 1000, CSP_O_NONE);
 	csp_print("ACK Packet send on PORT (%d): %s (%ld)\n", SERVER_ACK_PORT,
 			(char* ) ack_packet->data, ack_packet->length);
 	csp_buffer_free(ack_packet);
@@ -519,6 +522,7 @@ void canStartServerTask(void *argument)
 	csp_socket_t sock =
 	{ 0 };
 	int dp = 0;
+	csp_packet_t *packet;
 
 	csp_print("Server task started\n");
 
@@ -542,17 +546,14 @@ void canStartServerTask(void *argument)
 		}
 
 		/* Read packets on connection, timout is 10 mS */
-		csp_packet_t *packet;
-		while ((packet = csp_read(conn, 50)) != NULL)
+
+		while ((packet = csp_read(conn, 20)) != NULL)
 		{
 			dp = csp_conn_dport(conn);
 			switch (dp)
 			{
 			case SERVER_TC_PORT:
 				/* Process packet here */
-				csp_print("TC Packet received on PORT (%d): %s (%ld)\n", dp,
-						(char* ) packet->data, packet->length)
-				;
 				TC_RECV_Handler(packet);
 				server_received++;
 				break;
@@ -642,8 +643,10 @@ void canStartClientTask(void *argument)
 			continue;
 		}
 
+		osMutexAcquire(canSendMutexHandle, 1000);
 		/* 5. Send packet */
 		csp_send(conn, packet);
+		osMutexRelease(canSendMutexHandle);
 
 		/* 6. Close connection */
 		csp_buffer_free(packet);
